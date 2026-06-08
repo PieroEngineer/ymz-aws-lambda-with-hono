@@ -4,7 +4,7 @@ import { PutCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getS3Client, getDynamoDBClient } from "../aws/clientFactory.js";
 
-// ⚙️ CONFIGURATION CONSTANTS
+/// ⚙️ CONFIGURATION CONSTANTS
 const BUCKET_NAME = "restaurant-assets";
 const TABLE_NAME = "YummiziTable";
 const STATIC_USER_ID = "00000000-0000-4000-a000-000000000000";
