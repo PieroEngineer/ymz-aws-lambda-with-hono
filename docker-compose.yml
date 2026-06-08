@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  localstack:
+    container_name: localstack_yummizi
+    image: localstack/localstack:latest
+    ports:
+      - "127.0.0.1:4566:4566"            # 🔌 Core LocalStack Gateway Doorway
+    environment:
+      - SERVICES=s3,dynamodb,lambda,apigateway # 🛠️ Enabled microservices
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - "./init-aws:/etc/localstack/init/ready.d" # 🚀 Auto-runs initialization scripts
+      - "/var/run/docker.sock:/var/run/docker.sock" # 🐳 Needed by LocalStack to run your future TS mock lambdas
