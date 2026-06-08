@@ -5,10 +5,10 @@ TABLE_NAME="YummiziTable"
 BUCKET_NAME="restaurant-assets"
 REGION="us-east-1"
 STAGE="prod"
-API_NAME="YummiziHTTP_API"
+API_NAME="YummiziREST_API"
 LAMBDA_NAME="YummiziHonoBackend"
 
-echo "🏗️  Starting Single-Table & HTTP API Proxy Construction..."
+echo "🏗️  Starting Single-Table & REST API Proxy Construction (Free Tier Compliant)..."
 
 # 2. Infrastructure: DynamoDB & S3 Creation
 echo "📦 Creating DynamoDB Single-Table..."
@@ -27,8 +27,6 @@ echo "🪣 Creating S3 Bucket for Assets..."
 awslocal s3 mb s3://$BUCKET_NAME --region $REGION
 
 # 3. Dummy Placeholder Lambda Creation
-# 💡 NOTE: We create a structural placeholder so API Gateway has something to point to.
-# We will overwrite this code directly from our Hono project workspace as we write the code!
 echo "⚡ Provisioning Modular Lambda Routing Pipeline..."
 mkdir -p /tmp/dummy-lambda
 echo "exports.handler = async () => ({ statusCode: 200, body: 'Hono Pipeline Booting...' });" > /tmp/dummy-lambda/index.js
@@ -46,42 +44,43 @@ LAMBDA_ARN=$(awslocal lambda create-function \
 
 rm -rf /tmp/dummy-lambda
 
-# 4. Gateway: Cheap, High-Speed HTTP API (v2) Configuration
-echo "🌐 Launching HTTP API Gateway V2 Pipeline..."
-API_ID=$(awslocal apigatewayv2 create-api \
-    --name "$API_NAME" \
-    --protocol-type HTTP \
-    --query "ApiId" \
+# 4. Gateway: REST API (v1) Configuration with a Greedy Proxy
+echo "🌐 Launching REST API Gateway Catch-All Pipeline..."
+API_ID=$(awslocal apigateway create-rest-api --name "$API_NAME" --query "id" --output text --region $REGION)
+PARENT_ID=$(awslocal apigateway get-resources --rest-api-id $API_ID --query "items[0].id" --output text --region $REGION)
+
+# 🚇 CREATE A GREEDY PROXY PATH ({proxy+}) TO CATCH ALL TRAFFIC FOR HONO
+PROXY_RES_ID=$(awslocal apigateway create-resource \
+    --rest-api-id $API_ID \
+    --parent-id $PARENT_ID \
+    --path-part "{proxy+}" \
+    --query "id" \
     --output text \
     --region $REGION)
 
-# 🛠️ INTEGRATION: Tie API Gateway to our single monolithic Hono Lambda function
-INTEGRATION_ID=$(awslocal apigatewayv2 create-integration \
-    --api-id "$API_ID" \
-    --integration-type AWS_PROXY \
-    --integration-uri "$LAMBDA_ARN" \
-    --payload-format-version "2.0" \
-    --query "IntegrationId" \
-    --output text \
-    --region $REGION)
-
-# 🚇 GREEDY ROUTE: Capture ALL traffic ($default) and funnel it into the single Hono Router
-awslocal apigatewayv2 create-route \
-    --api-id "$API_ID" \
-    --route-key "$default" \
-    --target "integrations/$INTEGRATION_ID" \
+# Setup ANY HTTP method integration mapping directly to our Lambda
+awslocal apigateway put-method \
+    --rest-api-id $API_ID \
+    --resource-id $PROXY_RES_ID \
+    --http-method ANY \
+    --authorization-type "NONE" \
     --region $REGION
 
-# 🚀 DEPLOYMENT: Activate the environment stage
-awslocal apigatewayv2 create-stage \
-    --api-id "$API_ID" \
-    --stage-name "$STAGE" \
-    --auto-deploy \
+awslocal apigateway put-integration \
+    --rest-api-id $API_ID \
+    --resource-id $PROXY_RES_ID \
+    --http-method ANY \
+    --type AWS_PROXY \
+    --integration-http-method POST \
+    --uri "arn:aws:apigateway:$REGION:lambda:path/2015-03-31/functions/$LAMBDA_ARN/invocations" \
     --region $REGION
+
+# 🚀 DEPLOYMENT: Create deployment stage
+awslocal apigateway create-deployment --rest-api-id $API_ID --stage-name $STAGE --region $REGION
 
 echo "-----------------------------------------------------------"
 echo "✅ INFRASTRUCTURE CONSTRUCTION COMPLETE"
 echo "📍 API ID: $API_ID"
 echo "🔗 Unified Base URL: http://localhost:4566/_aws/execute-api/$API_ID/$STAGE/"
-echo "💡 The single proxy handles all variations: /feed, /requests, /users, etc."
+echo "💡 Use this Base URL for your mobile app! Add any route at the end: /feed, /requests, etc."
 echo "-----------------------------------------------------------"
