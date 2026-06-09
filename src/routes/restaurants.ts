@@ -143,21 +143,25 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
         menuPages.push({
           pageId: sk.replace("RESOURCE#MENU#", ""),
           imageUrl: `${s3BaseUrl}/${item.imageUrl || ""}`,
-          pageNumber: Number(item.pageNumber || 0)
+          pageNumber: Number(item.pageNumber || 0)  /// Check if sending it to page 0 is ok in case of fail
         });
       } else if (sk.startsWith("RESOURCE#DISH#")) {
-        dishes.push({
-          id: sk.replace("RESOURCE#DISH#", ""),
-          name: item.dishName,
-          imageUrl: `${s3BaseUrl}/${item.dishImageUrl || ""}`,
-          priceCents: Number(item.priceCents || 0),
-          prepTime: Number(item.prepTime || 0),
-          isOutOfStock: Boolean(item.isOutOfStock || false),
-          menuPageId: item.menuPageId,
-          coordinateXInMenu: item.coordinateXInMenu,
-          coordinateYInMenu: item.coordinateYInMenu,
-          description: item.description
-        });
+        if ((item.priceCents??null)!==null && (item.prepTime??null)!==null){
+          dishes.push({
+            id: sk.replace("RESOURCE#DISH#", ""),
+            name: item.dishName,
+            imageUrl: `${s3BaseUrl}/${item.dishImageUrl || ""}`,
+            priceCents: Number(item.priceCents),
+            prepTime: Number(item.prepTime),
+            isOutOfStock: Boolean(item.isOutOfStock || false),
+            menuPageId: item.menuPageId,
+            coordinateXInMenu: item.coordinateXInMenu,
+            coordinateYInMenu: item.coordinateYInMenu,
+            description: item.description || ""
+          });
+        } else{
+          console.log(`🚨  There was an issue with the price or preparation time of ${sk.replace("RESOURCE#DISH#", "")} | Fallback: pin is not sent`);
+        }
       }
     }
 
