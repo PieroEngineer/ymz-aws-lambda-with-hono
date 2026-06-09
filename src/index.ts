@@ -1,33 +1,56 @@
 import { Hono } from "hono";
-import { getS3Client } from "./aws/clientFactory.js";
-import { ListBucketsCommand } from "@aws-sdk/client-s3";
+import { handle } from "hono/aws-lambda"; // 🔌 Official Hono adapter for AWS serverless payloads
+import { requestsRouter } from "./routes/requests.js"; // 📦 Import your requests submodule router
+import { restaurantsRouter } from "./routes/restaurants.js"; // 🔌 Import the new file
 
+// Initialize the root Hono platform application
 const app = new Hono();
 
-// 🔌 Initialize our cloud clients seamlessly
-const s3 = getS3Client();
+/**
+ * 🚇 UNIFIED SUB-ROUTER REGISTRATION
+ * Funnels all traffic coming to '/requests/*' straight into our modular requests router.
+ * This includes /requests/create and /requests/:requestId/cancel
+ */
+app.route("/requests", requestsRouter);
+app.route("/restaurants", restaurantsRouter); // 🏪 Funnels all /restaurants/* traffic here
 
 /**
- * 🛰️ ROUTE: Get all local or cloud S3 buckets
+ * 🎯 BASE HEALTH CHECK ROUTE
+ * Useful to verify your API Gateway proxy is successfully reaching the Lambda.
  */
-app.get("/buckets", async (c) => {
-  try {
-    // Execute command using our adapted client
-    const response = await s3.send(new ListBucketsCommand({}));
-    const bucketNames = response.Buckets?.map(b => b.Name) || [];
-    
-    return c.json({
-      success: true,
-      environment: process.env.NODE_ENV || "development",
-      buckets: bucketNames,
-    });
-  } catch (error: any) {
-    // 🚨 ERROR HANDLING: Clean up messages for the mobile client
-    return c.json({ 
-      success: false, 
-      message: error.message 
-    }, 500);
-  }
+app.get("/", (c) => {
+  return c.json({
+    status: "healthy",
+    service: "Yummizi Engine",
+    timestamp: new Date().toISOString()
+  });
 });
+
+/**
+ * 🚀 PRODUCTION HANDLER EXPORT (AWS Lambda & LocalStack)
+ * The handle() wrapper automatically translates API Gateway events (v1 and v2) 
+ * into standard Hono requests and responses perfectly.
+ */
+export const handler = handle(app);
+
+/**
+ * 💻 STANDALONE NODE SERVER ENGINE (Local Development Sandbox)
+ * Runs your backend on http://localhost:3000 when you execute `npm run dev`.
+ * It automatically bypasses the Lambda simulator overhead for instant console logs.
+ */
+if (process.env.NODE_ENV === "development" && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  import("@hono/node-server").then(({ serve }) => {
+    const port = 3000;
+    console.log(`\n=================================================`);
+    console.log(`🏃‍♂️ Yummizi Engine listening on http://localhost:${port}`);
+    console.log(`💡 Standalone mode active: testing routes is super fast!`);
+    console.log(`=================================================\n`);
+    
+    serve({
+      fetch: app.fetch,
+      port: port
+    });
+  });
+}
 
 export default app;

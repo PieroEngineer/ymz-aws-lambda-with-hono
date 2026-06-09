@@ -161,9 +161,9 @@ async function seedData() {
           }
         }));
 
-        console.log(`✅🍽️  ${dishName} mapped to page ${mIdx + 1} for restaurant: Gourmet Hub ${i}`);
+        console.log(`✅🍽️  ${dishName} (${dishImageUrl}) mapped to page ${mIdx + 1} for restaurant: Gourmet Hub ${i}`);
       }
-      console.log(`✅📇 Menu page ${mIdx + 1} fully initialized.`);
+      console.log(`✅📇 Menu page ${mIdx + 1} (${menuImageUrl}) fully initialized.`);
     }
 
     if (dishImageUrlsToShow.length === 0) {
@@ -198,7 +198,7 @@ async function seedData() {
       }
     }));
 
-    console.log(`🏪 Restaurant Gourmet Hub ${i} indexed into User Section -> [${targetSection}]\n`);
+    console.log(`🏪 Restaurant Gourmet Hub ${i} (${logoImageKey}) indexed into User Section -> [${targetSection}]\n`);
   }
 
   console.log("-----------------------------------------------------------");
