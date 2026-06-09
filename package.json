@@ -7,7 +7,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "cross-env LOCALSTACK_ENDPOINT=http://localhost:4566 NODE_ENV=development tsx watch src/index.ts",
     "seed": "cross-env LOCALSTACK_ENDPOINT=http://localhost:4566 tsx src/scripts/seed.ts",
-    "deploy:local": "tsc && xcopy node_modules dist\\node_modules /E /I /H /Y /Q && cd dist && tar -a -c -f handler.zip * && docker cp handler.zip localstack_yummizi:/tmp/handler.zip && docker exec localstack_yummizi awslocal lambda update-function-code --function-name YummiziHonoBackend --zip-file fileb:///tmp/handler.zip && del handler.zip"
+    "deploy:local": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js --external:@aws-sdk/* --external:@hono/node-server && echo {\"type\":\"module\"} > dist\\package.json && cd dist && tar -a -c -f handler.zip index.js package.json && docker cp handler.zip localstack_yummizi:/tmp/handler.zip && docker exec localstack_yummizi awslocal lambda update-function-code --function-name YummiziHonoBackend --zip-file fileb:///tmp/handler.zip && del handler.zip && del package.json"
   },
   "keywords": [],
   "author": "",
@@ -23,6 +23,7 @@
   "devDependencies": {
     "@types/node": "^25.9.2",
     "cross-env": "^10.1.0",
+    "esbuild": "^0.28.0",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   }

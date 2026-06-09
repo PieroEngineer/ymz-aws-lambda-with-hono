@@ -33,7 +33,6 @@ restaurantsRouter.get("/feed", async (c) => {
     //   : `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION || "us-east-1"}.amazonaws.com`;
 
     const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`
-    console.log(`🪣  Current Bucket ${s3BaseUrl}\n`);
 
     // 2. STEP 1: Find the Section relation pointer records (SEC# rows)
     const feedLinksResponse = await docClient.send(new QueryCommand({
