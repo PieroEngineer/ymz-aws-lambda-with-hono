@@ -2616,10 +2616,72 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
   }
 });
 
+// src/routes/users.ts
+import { PutCommand as PutCommand2, DeleteCommand, DynamoDBDocumentClient as DynamoDBDocumentClient3 } from "@aws-sdk/lib-dynamodb";
+var docClient3 = DynamoDBDocumentClient3.from(getDynamoDBClient(), {
+  marshallOptions: { removeUndefinedValues: true }
+});
+var TABLE_NAME3 = "YummiziTable";
+var usersRouter = new Hono2();
+usersRouter.put("/:userId/preferences/:prefId", async (c) => {
+  try {
+    const user_id = c.req.param("userId");
+    const pref_id = c.req.param("prefId");
+    if (!user_id || !pref_id) {
+      return c.json({ error: "Missing userId or prefId in path" }, 400);
+    }
+    const body = await c.req.json().catch(() => ({}));
+    const pk = `USER#${user_id}`;
+    const sk = `PREF#${pref_id}`;
+    const preferenceItem = {
+      PK: pk,
+      SK: sk,
+      userId: user_id,
+      // Redundant but useful for GSIs later
+      prefId: pref_id,
+      title: body.title,
+      description: body.description,
+      color: body.color,
+      createdAt: body.createdAt ? Number(body.createdAt) : void 0
+      // Maps Kotlin Long timestamp cleanly
+    };
+    await docClient3.send(new PutCommand2({
+      TableName: TABLE_NAME3,
+      Item: preferenceItem
+    }));
+    console.log(`\u2705\u{1F64B} The preference ${pref_id} for user ${user_id} was successfully added`);
+    return c.json({ message: "Preference saved successfully" }, 200);
+  } catch (error) {
+    console.error(`\u{1F6A9} USER PREF PUT ERROR: ${error.message}`);
+    return c.json({ error: "Internal Server Error" }, 500);
+  }
+});
+usersRouter.delete("/:userId/preferences/:prefId", async (c) => {
+  try {
+    const user_id = c.req.param("userId");
+    const pref_id = c.req.param("prefId");
+    if (!user_id || !pref_id) {
+      return c.json({ error: "Missing userId or prefId in path" }, 400);
+    }
+    const pk = `USER#${user_id}`;
+    const sk = `PREF#${pref_id}`;
+    await docClient3.send(new DeleteCommand({
+      TableName: TABLE_NAME3,
+      Key: { PK: pk, SK: sk }
+    }));
+    console.log(`\u2705\u{1F5D1}\uFE0F The preference ${pref_id} of user ${user_id} was successfully deleted`);
+    return c.body(null, 204);
+  } catch (error) {
+    console.error(`\u{1F6A9} USER PREF DELETE ERROR: ${error.message}`);
+    return c.json({ error: "Internal Server Error" }, 500);
+  }
+});
+
 // src/index.ts
 var app = new Hono2();
 app.route("/requests", requestsRouter);
 app.route("/restaurants", restaurantsRouter);
+app.route("/users", usersRouter);
 app.get("/", (c) => {
   return c.json({
     status: "healthy",
