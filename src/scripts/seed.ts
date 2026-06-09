@@ -77,7 +77,7 @@ async function seedData() {
 
   // 📁 2. READ PREREQUISITE UUID BLUEPRINTS
   const restaurantUuids: string[] = readJsonFile("my_uuids/restaurant_uuids.json");
-  const foodUuids: string[] = readJsonFile("my_uuids/food_uuids.json");
+  // const foodUuids: string[] = readJsonFile("my_uuids/food_uuids.json");
   const menuUuids: string[] = readJsonFile("my_uuids/menu_uuids.json");
 
   // 🚨 DATA VALIDATION SAFEGUARDS

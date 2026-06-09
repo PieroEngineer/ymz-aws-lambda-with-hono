@@ -2512,8 +2512,6 @@ restaurantsRouter.get("/feed", async (c) => {
       return c.json({ error: "Missing userId" }, 400);
     }
     const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`;
-    console.log(`\u{1FAA3}  Current Bucket ${s3BaseUrl}
-`);
     const feedLinksResponse = await docClient2.send(new QueryCommand({
       TableName: TABLE_NAME2,
       KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
@@ -2562,6 +2560,58 @@ restaurantsRouter.get("/feed", async (c) => {
     return c.json(formattedFeed, 200);
   } catch (error) {
     console.error(`\u{1F6A8} FEED ROUTE ERROR: ${error.message}`);
+    return c.json({ error: "Internal Server Error" }, 500);
+  }
+});
+restaurantsRouter.get("/:restaurantId/menu", async (c) => {
+  try {
+    const rid = c.req.param("restaurantId");
+    if (!rid) {
+      return c.json({ error: "restaurantId is required" }, 400);
+    }
+    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`;
+    const response = await docClient2.send(new QueryCommand({
+      TableName: TABLE_NAME2,
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+      ExpressionAttributeValues: {
+        ":pk": `REST#${rid}`,
+        ":skPrefix": "RESOURCE#"
+      }
+    }));
+    const items = response.Items || [];
+    const menuPages = [];
+    const dishes = [];
+    for (const item of items) {
+      const sk = item.SK || "";
+      if (sk.startsWith("RESOURCE#MENU#")) {
+        menuPages.push({
+          pageId: sk.replace("RESOURCE#MENU#", ""),
+          imageUrl: `${s3BaseUrl}/${item.imageUrl || ""}`,
+          pageNumber: Number(item.pageNumber || 0)
+        });
+      } else if (sk.startsWith("RESOURCE#DISH#")) {
+        dishes.push({
+          id: sk.replace("RESOURCE#DISH#", ""),
+          name: item.dishName,
+          imageUrl: `${s3BaseUrl}/${item.dishImageUrl || ""}`,
+          priceCents: Number(item.priceCents || 0),
+          prepTime: Number(item.prepTime || 0),
+          isOutOfStock: Boolean(item.isOutOfStock || false),
+          menuPageId: item.menuPageId,
+          coordinateXInMenu: item.coordinateXInMenu,
+          coordinateYInMenu: item.coordinateYInMenu,
+          description: item.description
+        });
+      }
+    }
+    menuPages.sort((a, b) => a.pageNumber - b.pageNumber);
+    console.log(`\u2705\u{1F4C3} Menu info attached and mapped for Restaurant ID: ${rid}`);
+    return c.json({
+      menuPages,
+      dishes
+    }, 200);
+  } catch (error) {
+    console.error(`\u{1F6A8} MENU ROUTE ERROR: ${error.message}`);
     return c.json({ error: "Internal Server Error" }, 500);
   }
 });

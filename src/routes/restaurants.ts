@@ -98,3 +98,81 @@ restaurantsRouter.get("/feed", async (c) => {
     return c.json({ error: "Internal Server Error" }, 500);
   }
 });
+
+
+/**
+ * 🛰️ ROUTE: Get full Menu Details (Pages & Dishes) for a specific Restaurant
+ * PATH: GET /restaurants/:restaurantId/menu
+ */
+restaurantsRouter.get("/:restaurantId/menu", async (c) => {
+  try {
+    const rid = c.req.param("restaurantId");
+
+    if (!rid) {
+      return c.json({ error: "restaurantId is required" }, 400);
+    }
+
+    // 🗺️ DYNAMIC S3 RESOLUTION: Matches development environments vs production targets
+    // const isLocal = process.env.NODE_ENV === "development" || !!process.env.LOCALSTACK_ENDPOINT;
+    // const s3BaseUrl = isLocal 
+    //   ? `http://localhost:4566/${BUCKET_NAME}`
+    //   : `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION || "us-east-1"}.amazonaws.com`;
+
+    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`
+
+    // ⚡ SINGLE-TABLE QUERY: Grabs both Dishes and Menu details in 1 fast DB request
+    const response = await docClient.send(new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+      ExpressionAttributeValues: {
+        ":pk": `REST#${rid}`,
+        ":skPrefix": "RESOURCE#",
+      }
+    }));
+
+    const items = response.Items || [];
+    
+    const menuPages: any[] = [];
+    const dishes: any[] = [];
+
+    // Parse and split rows based on sub-keys
+    for (const item of items) {
+      const sk: string = item.SK || "";
+
+      if (sk.startsWith("RESOURCE#MENU#")) {
+        menuPages.push({
+          pageId: sk.replace("RESOURCE#MENU#", ""),
+          imageUrl: `${s3BaseUrl}/${item.imageUrl || ""}`,
+          pageNumber: Number(item.pageNumber || 0)
+        });
+      } else if (sk.startsWith("RESOURCE#DISH#")) {
+        dishes.push({
+          id: sk.replace("RESOURCE#DISH#", ""),
+          name: item.dishName,
+          imageUrl: `${s3BaseUrl}/${item.dishImageUrl || ""}`,
+          priceCents: Number(item.priceCents || 0),
+          prepTime: Number(item.prepTime || 0),
+          isOutOfStock: Boolean(item.isOutOfStock || false),
+          menuPageId: item.menuPageId,
+          coordinateXInMenu: item.coordinateXInMenu,
+          coordinateYInMenu: item.coordinateYInMenu,
+          description: item.description
+        });
+      }
+    }
+
+    // Sort menu pages sequentially by page index number
+    menuPages.sort((a, b) => a.pageNumber - b.pageNumber);
+
+    console.log(`✅📃 Menu info attached and mapped for Restaurant ID: ${rid}`);
+
+    return c.json({
+      menuPages,
+      dishes
+    }, 200);
+
+  } catch (error: any) {
+    console.error(`🚨 MENU ROUTE ERROR: ${error.message}`);
+    return c.json({ error: "Internal Server Error" }, 500);
+  }
+});
