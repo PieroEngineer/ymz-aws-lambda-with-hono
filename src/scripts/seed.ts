@@ -64,7 +64,7 @@ async function seedData() {
     }
   }
 
-  const logoImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("logos/"));
+  const logoImageKeys_ = Object.keys(sampleImagesMap).filter(k => k.startsWith("logos/"));
   const foodImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("foods/"));
   const menuImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("menus/"));
 
@@ -76,9 +76,13 @@ async function seedData() {
   ];
 
   // 📁 2. READ PREREQUISITE UUID BLUEPRINTS
-  const restaurantUuids: string[] = readJsonFile("my_uuids/restaurant_uuids.json");
+  const restaurantUuids_: string[] = readJsonFile("my_uuids/restaurant_uuids.json");
   // const foodUuids: string[] = readJsonFile("my_uuids/food_uuids.json");
   const menuUuids: string[] = readJsonFile("my_uuids/menu_uuids.json");
+
+  // ✂️ Reducing amount of elements
+  const logoImageKeys = logoImageKeys_.slice(0, 2);
+  const restaurantUuids = restaurantUuids_.slice(0, 2);
 
   // 🚨 DATA VALIDATION SAFEGUARDS
   if (menuImageKeys.length !== dishesCoordinates.length) {
