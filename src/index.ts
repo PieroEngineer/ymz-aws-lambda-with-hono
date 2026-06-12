@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors"; // 🔌 1. Import the native CORS middleware
 import { handle } from "hono/aws-lambda"; // 🔌 Official Hono adapter for AWS serverless payloads
 import { requestsRouter } from "./routes/requests.js"; // 📦 Import your requests submodule router
 import { restaurantsRouter } from "./routes/restaurants.js"; // 🔌 Import the new file
@@ -6,6 +7,20 @@ import { usersRouter } from "./routes/users.js";
 
 // Initialize the root Hono platform application
 const app = new Hono();
+
+// 🔓 2. Enable CORS globally before your routes
+// This allows your web app running on ANY local port to talk to your API
+app.use(
+  "/*",
+  cors({
+    origin: (origin) => (origin.includes("localhost") ? origin : null), // Dynamically allows any local port (3000, 5173, etc.)
+    allowHeaders: ["Content-Type", "Authorization"],
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    exposeHeaders: ["Content-Length"],
+    maxAge: 600,
+    credentials: true,
+  })
+);
 
 /**
  * 🚇 UNIFIED SUB-ROUTER REGISTRATION

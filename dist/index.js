@@ -2071,6 +2071,91 @@ var Hono2 = class extends Hono {
   }
 };
 
+// node_modules/hono/dist/middleware/cors/index.js
+var cors = (options) => {
+  const opts = {
+    origin: "*",
+    allowMethods: ["GET", "HEAD", "PUT", "POST", "DELETE", "PATCH"],
+    allowHeaders: [],
+    exposeHeaders: [],
+    ...options
+  };
+  const findAllowOrigin = ((optsOrigin) => {
+    if (typeof optsOrigin === "string") {
+      if (optsOrigin === "*") {
+        if (opts.credentials) {
+          return (origin) => origin || null;
+        }
+        return () => optsOrigin;
+      } else {
+        return (origin) => optsOrigin === origin ? origin : null;
+      }
+    } else if (typeof optsOrigin === "function") {
+      return optsOrigin;
+    } else {
+      return (origin) => optsOrigin.includes(origin) ? origin : null;
+    }
+  })(opts.origin);
+  const findAllowMethods = ((optsAllowMethods) => {
+    if (typeof optsAllowMethods === "function") {
+      return optsAllowMethods;
+    } else if (Array.isArray(optsAllowMethods)) {
+      return () => optsAllowMethods;
+    } else {
+      return () => [];
+    }
+  })(opts.allowMethods);
+  return async function cors2(c, next) {
+    function set(key, value) {
+      c.res.headers.set(key, value);
+    }
+    const allowOrigin = await findAllowOrigin(c.req.header("origin") || "", c);
+    if (allowOrigin) {
+      set("Access-Control-Allow-Origin", allowOrigin);
+    }
+    if (opts.credentials) {
+      set("Access-Control-Allow-Credentials", "true");
+    }
+    if (opts.exposeHeaders?.length) {
+      set("Access-Control-Expose-Headers", opts.exposeHeaders.join(","));
+    }
+    if (c.req.method === "OPTIONS") {
+      if (opts.origin !== "*" || opts.credentials) {
+        set("Vary", "Origin");
+      }
+      if (opts.maxAge != null) {
+        set("Access-Control-Max-Age", opts.maxAge.toString());
+      }
+      const allowMethods = await findAllowMethods(c.req.header("origin") || "", c);
+      if (allowMethods.length) {
+        set("Access-Control-Allow-Methods", allowMethods.join(","));
+      }
+      let headers = opts.allowHeaders;
+      if (!headers?.length) {
+        const requestHeaders = c.req.header("Access-Control-Request-Headers");
+        if (requestHeaders) {
+          headers = requestHeaders.split(/\s*,\s*/);
+        }
+      }
+      if (headers?.length) {
+        set("Access-Control-Allow-Headers", headers.join(","));
+        c.res.headers.append("Vary", "Access-Control-Request-Headers");
+      }
+      c.res.headers.delete("Content-Length");
+      c.res.headers.delete("Content-Type");
+      return new Response(null, {
+        headers: c.res.headers,
+        status: 204,
+        statusText: "No Content"
+      });
+    }
+    await next();
+    if (opts.origin !== "*" || opts.credentials) {
+      c.header("Vary", "Origin", { append: true });
+    }
+  };
+};
+
 // node_modules/hono/dist/utils/encode.js
 var encodeBase64 = (buf) => {
   let binary = "";
@@ -2499,6 +2584,7 @@ requestsRouter.post("/:requestId/cancel", async (c) => {
 
 // src/routes/restaurants.ts
 import { QueryCommand, BatchGetCommand, DynamoDBDocumentClient as DynamoDBDocumentClient2 } from "@aws-sdk/lib-dynamodb";
+import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 var docClient2 = DynamoDBDocumentClient2.from(getDynamoDBClient(), {
   marshallOptions: { removeUndefinedValues: true }
 });
@@ -2588,20 +2674,25 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
           pageId: sk.replace("RESOURCE#MENU#", ""),
           imageUrl: `${s3BaseUrl}/${item.imageUrl || ""}`,
           pageNumber: Number(item.pageNumber || 0)
+          /// Check if sending it to page 0 is ok in case of fail
         });
       } else if (sk.startsWith("RESOURCE#DISH#")) {
-        dishes.push({
-          id: sk.replace("RESOURCE#DISH#", ""),
-          name: item.dishName,
-          imageUrl: `${s3BaseUrl}/${item.dishImageUrl || ""}`,
-          priceCents: Number(item.priceCents || 0),
-          prepTime: Number(item.prepTime || 0),
-          isOutOfStock: Boolean(item.isOutOfStock || false),
-          menuPageId: item.menuPageId,
-          coordinateXInMenu: item.coordinateXInMenu,
-          coordinateYInMenu: item.coordinateYInMenu,
-          description: item.description
-        });
+        if ((item.priceCents ?? null) !== null && (item.prepTime ?? null) !== null) {
+          dishes.push({
+            id: sk.replace("RESOURCE#DISH#", ""),
+            name: item.dishName,
+            imageUrl: `${s3BaseUrl}/${item.dishImageUrl || ""}`,
+            priceCents: Number(item.priceCents),
+            prepTime: Number(item.prepTime),
+            isOutOfStock: Boolean(item.isOutOfStock || false),
+            menuPageId: item.menuPageId,
+            coordinateXInMenu: item.coordinateXInMenu,
+            coordinateYInMenu: item.coordinateYInMenu,
+            description: item.description || ""
+          });
+        } else {
+          console.log(`\u{1F6A8}  There was an issue with the price or preparation time of ${sk.replace("RESOURCE#DISH#", "")} | Fallback: pin is not sent`);
+        }
       }
     }
     menuPages.sort((a, b) => a.pageNumber - b.pageNumber);
@@ -2612,6 +2703,146 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
     }, 200);
   } catch (error) {
     console.error(`\u{1F6A8} MENU ROUTE ERROR: ${error.message}`);
+    return c.json({ error: "Internal Server Error" }, 500);
+  }
+});
+restaurantsRouter.post("/:restaurantId/menu", async (c) => {
+  try {
+    const rid = c.req.param("restaurantId");
+    if (!rid) {
+      return c.json({ error: "restaurantId is required" }, 400);
+    }
+    const body = await c.req.json().catch(() => ({}));
+    const menuPages = body.menuPages || [];
+    const dishes = body.dishes || [];
+    const transactionItems = [];
+    for (const page of menuPages) {
+      const pageId = page.pageId;
+      const action = page.action;
+      const sk = `RESOURCE#MENU#${pageId}`;
+      if (action === "delete") {
+        transactionItems.push({
+          Delete: {
+            TableName: TABLE_NAME2,
+            Key: { PK: `REST#${rid}`, SK: sk }
+          }
+        });
+      } else if (action === "save") {
+        transactionItems.push({
+          Put: {
+            TableName: TABLE_NAME2,
+            Item: {
+              PK: `REST#${rid}`,
+              SK: sk,
+              pageNumber: Number(page.pageNumber || 0),
+              /**
+                        * 💡 HINT FOR SIGNED URL TRANSITION:
+                        * For now, we take the raw imageUrl. When migrating to pre-signed URLs, 
+                        * strip the S3 domain/base path and store ONLY the S3 object key string here
+                        * (e.g., page.imageUrl -> "restaurants/uuid/menus/page1.jpg").
+                        */
+              imageUrl: page.imageUrl
+            }
+          }
+        });
+      } else if (action === "update") {
+        transactionItems.push({
+          Update: {
+            TableName: TABLE_NAME2,
+            Key: {
+              PK: `REST#${rid}`,
+              SK: sk
+            },
+            // 📝 UpdateExpression targets only the specific fields modified
+            UpdateExpression: "SET pageNumber = :pageNumber, imageUrl = :imageUrl",
+            ExpressionAttributeValues: {
+              ":pageNumber": Number(page.pageNumber || 0),
+              ":imageUrl": page.imageUrl
+            }
+          }
+        });
+      }
+    }
+    for (const dish of dishes) {
+      const dishId = dish.id;
+      const action = dish.action;
+      const sk = `RESOURCE#DISH#${dishId}`;
+      if (action === "delete") {
+        transactionItems.push({
+          Delete: {
+            TableName: TABLE_NAME2,
+            Key: { PK: `REST#${rid}`, SK: sk }
+          }
+        });
+      } else if (action === "save") {
+        transactionItems.push({
+          Put: {
+            TableName: TABLE_NAME2,
+            Item: {
+              PK: `REST#${rid}`,
+              SK: sk,
+              dishName: dish.name,
+              priceCents: Number(dish.priceCents || 0),
+              prepTime: Number(dish.prepTime || 0),
+              isOutOfStock: false,
+              // Per request constraint: always false for now
+              menuPageId: dish.menuPageId,
+              coordinateXInMenu: dish.coordinateXInMenu,
+              coordinateYInMenu: dish.coordinateYInMenu,
+              description: dish.description,
+              /**
+              * 💡 HINT FOR SIGNED URL TRANSITION:
+              * Strip down full path URLs to save only the relative storage object key identifiers
+              * when moving to signed asset validation loops.
+              */
+              dishImageUrl: dish.imageUrl
+            }
+          }
+        });
+      } else if (action === "update") {
+        transactionItems.push({
+          Update: {
+            TableName: TABLE_NAME2,
+            Key: {
+              PK: `REST#${rid}`,
+              SK: sk
+            },
+            // ⚡ Granular update mapping every editable attribute without overwriting keys
+            UpdateExpression: `SET dishName = :name, 
+                                  priceCents = :price, 
+                                  prepTime = :prep, 
+                                  menuPageId = :menuPageId, 
+                                  coordinateXInMenu = :x, 
+                                  coordinateYInMenu = :y, 
+                                  description = :desc,
+                                  dishImageUrl = :img`,
+            ExpressionAttributeValues: {
+              ":name": dish.name,
+              ":price": Number(dish.priceCents || 0),
+              ":prep": Number(dish.prepTime || 0),
+              ":menuPageId": dish.menuPageId,
+              ":x": dish.coordinateXInMenu,
+              ":y": dish.coordinateYInMenu,
+              ":desc": dish.description,
+              ":img": dish.imageUrl
+            }
+          }
+        });
+      }
+    }
+    if (transactionItems.length === 0) {
+      return c.json({ message: "No menu or dish mutations provided." }, 200);
+    }
+    if (transactionItems.length > 100) {
+      return c.json({ error: "Transaction block exceeds AWS limit of 100 items." }, 400);
+    }
+    await docClient2.send(new TransactWriteCommand({
+      TransactItems: transactionItems
+    }));
+    console.log(`\u2705 TransactWrite completed: Synchronized menu states for Restaurant: ${rid}`);
+    return c.json({ message: "Menu state successfully synchronized atomically" }, 200);
+  } catch (error) {
+    console.error(`\u{1F6A8} SYNC MENU ROUTE ERROR: ${error.message}`);
     return c.json({ error: "Internal Server Error" }, 500);
   }
 });
@@ -2679,6 +2910,18 @@ usersRouter.delete("/:userId/preferences/:prefId", async (c) => {
 
 // src/index.ts
 var app = new Hono2();
+app.use(
+  "/*",
+  cors({
+    origin: (origin) => origin.includes("localhost") ? origin : null,
+    // Dynamically allows any local port (3000, 5173, etc.)
+    allowHeaders: ["Content-Type", "Authorization"],
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    exposeHeaders: ["Content-Length"],
+    maxAge: 600,
+    credentials: true
+  })
+);
 app.route("/requests", requestsRouter);
 app.route("/restaurants", restaurantsRouter);
 app.route("/users", usersRouter);
