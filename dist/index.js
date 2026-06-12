@@ -2715,6 +2715,7 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const menuPages = body.menuPages || [];
     const dishes = body.dishes || [];
+    console.log("\u{1F37D}\uFE0F  dishes to update\n", dishes);
     const transactionItems = [];
     for (const page of menuPages) {
       const pageId = page.pageId;
@@ -2779,6 +2780,7 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
           Put: {
             TableName: TABLE_NAME2,
             Item: {
+              // Shape of what is going to be sent
               PK: `REST#${rid}`,
               SK: sk,
               dishName: dish.name,
@@ -2795,39 +2797,47 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
               * Strip down full path URLs to save only the relative storage object key identifiers
               * when moving to signed asset validation loops.
               */
-              dishImageUrl: dish.imageUrl
+              imageUrl: dish.imageUrl
             }
           }
         });
       } else if (action === "update") {
-        transactionItems.push({
-          Update: {
-            TableName: TABLE_NAME2,
-            Key: {
-              PK: `REST#${rid}`,
-              SK: sk
-            },
-            // ⚡ Granular update mapping every editable attribute without overwriting keys
-            UpdateExpression: `SET dishName = :name, 
-                                  priceCents = :price, 
-                                  prepTime = :prep, 
-                                  menuPageId = :menuPageId, 
-                                  coordinateXInMenu = :x, 
-                                  coordinateYInMenu = :y, 
-                                  description = :desc,
-                                  dishImageUrl = :img`,
-            ExpressionAttributeValues: {
-              ":name": dish.name,
-              ":price": Number(dish.priceCents || 0),
-              ":prep": Number(dish.prepTime || 0),
-              ":menuPageId": dish.menuPageId,
-              ":x": dish.coordinateXInMenu,
-              ":y": dish.coordinateYInMenu,
-              ":desc": dish.description,
-              ":img": dish.imageUrl
+        const fieldMapping = {
+          name: "dishName",
+          priceCents: "priceCents",
+          prepTime: "prepTime",
+          menuPageId: "menuPageId",
+          coordinateXInMenu: "coordinateXInMenu",
+          coordinateYInMenu: "coordinateYInMenu",
+          description: "description",
+          isOutOfStock: "isOutOfStock",
+          imageUrl: "imageUrl"
+        };
+        const payloadSource = dish.updatedFields || dish;
+        const expressions = [];
+        const expressionAttributeValues = {};
+        for (const [clientKey, dbField] of Object.entries(fieldMapping)) {
+          if (payloadSource[clientKey] !== void 0) {
+            expressions.push(`${dbField} = :${clientKey}`);
+            if (clientKey === "priceCents" || clientKey === "prepTime" || clientKey === "coordinateXInMenu" || clientKey === "coordinateYInMenu") {
+              expressionAttributeValues[`:${clientKey}`] = Number(payloadSource[clientKey]);
+            } else if (clientKey === "isOutOfStock") {
+              expressionAttributeValues[`:${clientKey}`] = Boolean(payloadSource[clientKey]);
+            } else {
+              expressionAttributeValues[`:${clientKey}`] = payloadSource[clientKey];
             }
           }
-        });
+        }
+        if (expressions.length > 0) {
+          transactionItems.push({
+            Update: {
+              TableName: TABLE_NAME2,
+              Key: { PK: `REST#${rid}`, SK: sk },
+              UpdateExpression: `SET ${expressions.join(", ")}`,
+              ExpressionAttributeValues: expressionAttributeValues
+            }
+          });
+        }
       }
     }
     if (transactionItems.length === 0) {
@@ -2839,10 +2849,10 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
     await docClient2.send(new TransactWriteCommand({
       TransactItems: transactionItems
     }));
-    console.log(`\u2705 TransactWrite completed: Synchronized menu states for Restaurant: ${rid}`);
+    console.log(`\u2705\u2934\uFE0F TransactWrite completed: Synchronized menu states for Restaurant: ${rid}`);
     return c.json({ message: "Menu state successfully synchronized atomically" }, 200);
   } catch (error) {
-    console.error(`\u{1F6A8} SYNC MENU ROUTE ERROR: ${error.message}`);
+    console.error(`\u{1F6A8} SYNC MENU ROUTE ERROR -> ${error.message}`);
     return c.json({ error: "Internal Server Error" }, 500);
   }
 });

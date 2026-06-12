@@ -198,6 +198,8 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
     const menuPages = body.menuPages || [];
     const dishes = body.dishes || [];
 
+    console.log('🍽️  dishes to update\n', dishes)
+
     // This array will assemble all atomic actions for the single-table transaction block
     const transactionItems: any[] = [];
 
@@ -253,7 +255,7 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
     }
 
     // 🍔 PROCESS INDIVIDUAL DISHES
-    for (const dish of dishes) {
+    for (const dish of dishes) {  // Dishes from client
       const dishId = dish.id;
       const action = dish.action; // Expects "save" or "delete"
       const sk = `RESOURCE#DISH#${dishId}`;
@@ -269,7 +271,7 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
         transactionItems.push({
           Put: {
             TableName: TABLE_NAME,
-            Item: {
+            Item: { // Shape of what is going to be sent
               PK: `REST#${rid}`,
               SK: sk,
               dishName: dish.name,
@@ -285,40 +287,61 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
               * Strip down full path URLs to save only the relative storage object key identifiers
               * when moving to signed asset validation loops.
               */
-              dishImageUrl: dish.imageUrl
+              imageUrl: dish.imageUrl
             }
           }
         });
       }
       else if (action === "update") {
-        transactionItems.push({
-          Update: {
-            TableName: TABLE_NAME,
-            Key: { 
-              PK: `REST#${rid}`, 
-              SK: sk 
-            },
-            // ⚡ Granular update mapping every editable attribute without overwriting keys
-            UpdateExpression: `SET dishName = :name, 
-                                  priceCents = :price, 
-                                  prepTime = :prep, 
-                                  menuPageId = :menuPageId, 
-                                  coordinateXInMenu = :x, 
-                                  coordinateYInMenu = :y, 
-                                  description = :desc,
-                                  dishImageUrl = :img`,
-            ExpressionAttributeValues: {
-              ":name": dish.name,
-              ":price": Number(dish.priceCents || 0),
-              ":prep": Number(dish.prepTime || 0),
-              ":menuPageId": dish.menuPageId,
-              ":x": dish.coordinateXInMenu,
-              ":y": dish.coordinateYInMenu,
-              ":desc": dish.description,
-              ":img": dish.imageUrl
+        // 🧠 DYNAMIC COMPILER ENGINE
+        // Map client field names to their specific DynamoDB attribute counterparts
+        const fieldMapping: Record<string, string> = {
+          name: "dishName",
+          priceCents: "priceCents",
+          prepTime: "prepTime",
+          menuPageId: "menuPageId",
+          coordinateXInMenu: "coordinateXInMenu",
+          coordinateYInMenu: "coordinateYInMenu",
+          description: "description",
+          isOutOfStock: "isOutOfStock",
+          imageUrl: "imageUrl"
+        };
+
+        // Extract the target payload block (checks flat attributes first, falls back to an inner updatedFields map if structured that way)
+        const payloadSource = dish.updatedFields || dish;
+
+        const expressions: string[] = [];
+        const expressionAttributeValues: Record<string, any> = {};
+
+        // Only add things to the update execution parameters if the client explicitly sent them
+        for (const [clientKey, dbField] of Object.entries(fieldMapping)) {
+          if (payloadSource[clientKey] !== undefined) {
+            expressions.push(`${dbField} = :${clientKey}`);
+            
+            // Ensure proper numeric cast primitives for numbers
+            if (clientKey === "priceCents" || clientKey === "prepTime" || clientKey === "coordinateXInMenu" || clientKey === "coordinateYInMenu") {
+              expressionAttributeValues[`:${clientKey}`] = Number(payloadSource[clientKey]);
+            } 
+            else if (clientKey === "isOutOfStock"){
+              expressionAttributeValues[`:${clientKey}`] = Boolean(payloadSource[clientKey]);
+            }        
+            else {
+              expressionAttributeValues[`:${clientKey}`] = payloadSource[clientKey];
             }
           }
-        });
+        }
+
+        // Safety check: Avoid throwing errors if an update call was fired with an empty change block
+        if (expressions.length > 0) {
+          transactionItems.push({
+            Update: {
+              TableName: TABLE_NAME,
+              Key: { PK: `REST#${rid}`, SK: sk },
+              UpdateExpression: `SET ${expressions.join(", ")}`,
+              ExpressionAttributeValues: expressionAttributeValues
+            }
+          });
+        }
       }
     }
 
@@ -337,11 +360,11 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
       TransactItems: transactionItems
     }));
 
-    console.log(`✅ TransactWrite completed: Synchronized menu states for Restaurant: ${rid}`);
+    console.log(`✅⤴️ TransactWrite completed: Synchronized menu states for Restaurant: ${rid}`);
     return c.json({ message: "Menu state successfully synchronized atomically" }, 200);
 
   } catch (error: any) {
-    console.error(`🚨 SYNC MENU ROUTE ERROR: ${error.message}`);
+    console.error(`🚨 SYNC MENU ROUTE ERROR -> ${error.message}`);
     return c.json({ error: "Internal Server Error" }, 500);
   }
 });

@@ -154,7 +154,7 @@ async function seedData() {
             PK: `REST#${rid}`,
             SK: `RESOURCE#DISH#${did}`,
             dishName: dishName,
-            dishImageUrl: dishImageUrl,
+            imageUrl: dishImageUrl,
             prepTime: getRandomInt(10, 15),
             priceCents: getRandomInt(500, 4000), // Javascript numbers preserve floating points correctly inside DocumentClient
             isOutOfStock: false,
