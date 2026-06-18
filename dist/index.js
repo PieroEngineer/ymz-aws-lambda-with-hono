@@ -2496,7 +2496,22 @@ import { S3Client } from "@aws-sdk/client-s3";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 var isLocal = process.env.NODE_ENV === "development" || !!process.env.LOCALSTACK_ENDPOINT;
 var awsRegion = process.env.AWS_REGION || "us-east-1";
-var localstackUrl = process.env.LOCALSTACK_ENDPOINT || "http://localhost:4566";
+var localstackUrl = "http://localhost:4566";
+var getS3Client = () => {
+  if (isLocal) {
+    return new S3Client({
+      endpoint: localstackUrl,
+      region: awsRegion,
+      credentials: {
+        accessKeyId: "test",
+        secretAccessKey: "test"
+      },
+      // ⚠️ CRITICAL: LocalStack relies on path-style routing for local S3 buckets
+      forcePathStyle: true
+    });
+  }
+  return new S3Client({ region: awsRegion });
+};
 var getDynamoDBClient = () => {
   if (isLocal) {
     return new DynamoDBClient({
@@ -2585,6 +2600,9 @@ requestsRouter.post("/:requestId/cancel", async (c) => {
 // src/routes/restaurants.ts
 import { QueryCommand, BatchGetCommand, DynamoDBDocumentClient as DynamoDBDocumentClient2 } from "@aws-sdk/lib-dynamodb";
 import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+var s3Client = getS3Client();
 var docClient2 = DynamoDBDocumentClient2.from(getDynamoDBClient(), {
   marshallOptions: { removeUndefinedValues: true }
 });
@@ -2633,9 +2651,9 @@ restaurantsRouter.get("/feed", async (c) => {
       return {
         id: rid,
         name: res.name,
-        logoUrl: `${s3BaseUrl}/${res.logoUrl || ""}`,
+        logoUrl: res.logoUrl || "",
         sectionType: sectionMap[rid] || "General",
-        dishesToShowUrls: originalDishes.map((img) => `${s3BaseUrl}/${img}`)
+        dishesToShowUrls: originalDishes
       };
     });
     console.log(`\u2705\u{1F3EA} Personalized feed items fetched and formatted for User: ${userId}
@@ -2672,7 +2690,7 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
       if (sk.startsWith("RESOURCE#MENU#")) {
         menuPages.push({
           pageId: sk.replace("RESOURCE#MENU#", ""),
-          imageUrl: `${s3BaseUrl}/${item.imageUrl || ""}`,
+          imageUrl: item.imageUrl || "",
           pageNumber: Number(item.pageNumber || 0)
           /// Check if sending it to page 0 is ok in case of fail
         });
@@ -2681,7 +2699,7 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
           dishes.push({
             id: sk.replace("RESOURCE#DISH#", ""),
             name: item.dishName,
-            imageUrl: `${s3BaseUrl}/${item.dishImageUrl || ""}`,
+            imageUrl: item.dishImageUrl || "",
             priceCents: Number(item.priceCents),
             prepTime: Number(item.prepTime),
             isOutOfStock: Boolean(item.isOutOfStock || false),
@@ -2696,7 +2714,8 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
       }
     }
     menuPages.sort((a, b) => a.pageNumber - b.pageNumber);
-    console.log(`\u2705\u{1F4C3} Menu info attached and mapped for Restaurant ID: ${rid}`);
+    console.log(`\u{1F50E}\u{1F4C3}  Menu info attached and mapped for Restaurant ID:
+${rid}`);
     return c.json({
       menuPages,
       dishes
@@ -2717,6 +2736,10 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
     const dishes = body.dishes || [];
     console.log("\u{1F37D}\uFE0F  dishes to update\n", dishes);
     const transactionItems = [];
+    const presignedUrls = [];
+    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`;
+    console.log(`\u{1F50E}\u{1F4C3}  Pages received:
+${JSON.stringify(menuPages, null, 2)}`);
     for (const page of menuPages) {
       const pageId = page.pageId;
       const action = page.action;
@@ -2728,40 +2751,55 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
             Key: { PK: `REST#${rid}`, SK: sk }
           }
         });
-      } else if (action === "save") {
-        transactionItems.push({
-          Put: {
-            TableName: TABLE_NAME2,
-            Item: {
-              PK: `REST#${rid}`,
-              SK: sk,
-              pageNumber: Number(page.pageNumber || 0),
-              /**
-                        * 💡 HINT FOR SIGNED URL TRANSITION:
-                        * For now, we take the raw imageUrl. When migrating to pre-signed URLs, 
-                        * strip the S3 domain/base path and store ONLY the S3 object key string here
-                        * (e.g., page.imageUrl -> "restaurants/uuid/menus/page1.jpg").
-                        */
-              imageUrl: page.imageUrl
-            }
-          }
+      } else if (action === "save" || action === "update") {
+        const s3Key = `menus/${pageId}.webp`;
+        const publicUrl = `${s3BaseUrl}/${s3Key}`;
+        console.log("\u{1F50E}  publicUrl", publicUrl);
+        const uploadUrl = await getSignedUrl(
+          s3Client,
+          new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: s3Key,
+            ContentType: "image/webp"
+            // Enforces binary media type constraints
+          }),
+          { expiresIn: 900 }
+          // URL token token expires safely in 15 minutes
+        );
+        console.log("\u{1F50E}  uploadUrl", uploadUrl);
+        presignedUrls.push({
+          pageId,
+          uploadUrl,
+          publicUrl
         });
-      } else if (action === "update") {
-        transactionItems.push({
-          Update: {
-            TableName: TABLE_NAME2,
-            Key: {
-              PK: `REST#${rid}`,
-              SK: sk
-            },
-            // 📝 UpdateExpression targets only the specific fields modified
-            UpdateExpression: "SET pageNumber = :pageNumber, imageUrl = :imageUrl",
-            ExpressionAttributeValues: {
-              ":pageNumber": Number(page.pageNumber || 0),
-              ":imageUrl": page.imageUrl
+        if (action === "save") {
+          transactionItems.push({
+            Put: {
+              TableName: TABLE_NAME2,
+              Item: {
+                PK: `REST#${rid}`,
+                SK: sk,
+                pageNumber: Number(page.pageNumber || 0),
+                imageUrl: publicUrl
+                // 🎯 Overwritten with the final public reading URL string destination
+              }
             }
-          }
-        });
+          });
+        } else if (action === "update") {
+          transactionItems.push({
+            Update: {
+              TableName: TABLE_NAME2,
+              Key: { PK: `REST#${rid}`, SK: sk },
+              UpdateExpression: "SET pageNumber = :pageNumber, imageUrl = :imageUrl",
+              //TODO: later it will need dynamic parameters (like the update of dishes) when individual
+              ExpressionAttributeValues: {
+                ":pageNumber": Number(page.pageNumber || 0),
+                ":imageUrl": publicUrl
+                // 🎯 Overwritten with the final public reading URL string destination
+              }
+            }
+          });
+        }
       }
     }
     for (const dish of dishes) {
@@ -2819,7 +2857,7 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
         for (const [clientKey, dbField] of Object.entries(fieldMapping)) {
           if (payloadSource[clientKey] !== void 0) {
             expressions.push(`${dbField} = :${clientKey}`);
-            if (clientKey === "priceCents" || clientKey === "prepTime" || clientKey === "coordinateXInMenu" || clientKey === "coordinateYInMenu") {
+            if (["priceCents", "prepTime", "coordinateXInMenu", "coordinateYInMenu"].includes(clientKey)) {
               expressionAttributeValues[`:${clientKey}`] = Number(payloadSource[clientKey]);
             } else if (clientKey === "isOutOfStock") {
               expressionAttributeValues[`:${clientKey}`] = Boolean(payloadSource[clientKey]);
@@ -2840,6 +2878,8 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
         }
       }
     }
+    console.log(`\u{1F50E}\u{1F4C3}  Data to be transacted:
+${JSON.stringify(transactionItems, null, 2)}`);
     if (transactionItems.length === 0) {
       return c.json({ message: "No menu or dish mutations provided." }, 200);
     }
@@ -2849,8 +2889,12 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
     await docClient2.send(new TransactWriteCommand({
       TransactItems: transactionItems
     }));
+    const responsePayload = {
+      message: "Menu state successfully synchronized atomically",
+      presignedUrls
+    };
     console.log(`\u2705\u2934\uFE0F TransactWrite completed: Synchronized menu states for Restaurant: ${rid}`);
-    return c.json({ message: "Menu state successfully synchronized atomically" }, 200);
+    return c.json(responsePayload, 200);
   } catch (error) {
     console.error(`\u{1F6A8} SYNC MENU ROUTE ERROR -> ${error.message}`);
     return c.json({ error: "Internal Server Error" }, 500);

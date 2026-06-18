@@ -5,7 +5,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 const isLocal = process.env.NODE_ENV === "development" || !!process.env.LOCALSTACK_ENDPOINT;
 
 const awsRegion = process.env.AWS_REGION || "us-east-1";
-const localstackUrl = process.env.LOCALSTACK_ENDPOINT || "http://localhost:4566";
+const localstackUrl = "http://localhost:4566"// || process.env.LOCALSTACK_ENDPOINT ;
 
 /**
  * 📦 MODULAR S3 CLIENT FACTORY

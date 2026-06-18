@@ -1,7 +1,27 @@
 import { Hono } from "hono";
 import { QueryCommand, BatchGetCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { getDynamoDBClient } from "../aws/clientFactory.js";
+import { getDynamoDBClient, getS3Client } from "../aws/clientFactory.js";
 import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { PutObjectCommand } from "@aws-sdk/client-s3"; // 📦 Native S3 actions
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"; // 🔑 Presign signing engines
+
+// Initialize the S3 Client engine instance
+const s3Client = getS3Client();
+
+//TODO: Change the URLs by keys, the entire link shouldn't be sent
+
+// 📦 Define your structural types matching client DTO definitions
+export interface PresignedUrlMapping {
+  pageId: string;
+  uploadUrl: string; // Temporary token URL for client PUT request
+  publicUrl: string; // The permanent public read URL saved in DB
+}
+
+export interface SyncDataFirstResponse {
+  message: string;
+  presignedUrls: PresignedUrlMapping[];
+}
+
 
 // 🔌 Wrap standard client for clean, automated JSON marshalling
 const docClient = DynamoDBDocumentClient.from(getDynamoDBClient(), {
@@ -32,7 +52,6 @@ restaurantsRouter.get("/feed", async (c) => { /// Maybe it's better to move this
     // const s3BaseUrl = isLocal 
     //   ? `http://localhost:4566/${BUCKET_NAME}`
     //   : `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION || "us-east-1"}.amazonaws.com`;
-
     const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`
 
     // 2. STEP 1: Find the Section relation pointer records (SEC# rows)
@@ -83,9 +102,9 @@ restaurantsRouter.get("/feed", async (c) => { /// Maybe it's better to move this
       return {
         id: rid,
         name: res.name,
-        logoUrl: `${s3BaseUrl}/${res.logoUrl || ""}`,
+        logoUrl: res.logoUrl || "",
         sectionType: sectionMap[rid] || "General",
-        dishesToShowUrls: originalDishes.map((img: string) => `${s3BaseUrl}/${img}`)
+        dishesToShowUrls: originalDishes
       };
     });
 
@@ -118,7 +137,6 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
     // const s3BaseUrl = isLocal 
     //   ? `http://localhost:4566/${BUCKET_NAME}`
     //   : `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION || "us-east-1"}.amazonaws.com`;
-
     const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`
 
     // ⚡ SINGLE-TABLE QUERY: Grabs both Dishes and Menu details in 1 fast DB request
@@ -143,7 +161,7 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
       if (sk.startsWith("RESOURCE#MENU#")) {
         menuPages.push({
           pageId: sk.replace("RESOURCE#MENU#", ""),
-          imageUrl: `${s3BaseUrl}/${item.imageUrl || ""}`,
+          imageUrl: item.imageUrl || "",
           pageNumber: Number(item.pageNumber || 0)  /// Check if sending it to page 0 is ok in case of fail
         });
       } else if (sk.startsWith("RESOURCE#DISH#")) {
@@ -151,7 +169,7 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
           dishes.push({
             id: sk.replace("RESOURCE#DISH#", ""),
             name: item.dishName,
-            imageUrl: `${s3BaseUrl}/${item.dishImageUrl || ""}`,
+            imageUrl: item.dishImageUrl || "",
             priceCents: Number(item.priceCents),
             prepTime: Number(item.prepTime),
             isOutOfStock: Boolean(item.isOutOfStock || false),
@@ -169,7 +187,7 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
     // Sort menu pages sequentially by page index number
     menuPages.sort((a, b) => a.pageNumber - b.pageNumber);
 
-    console.log(`✅📃 Menu info attached and mapped for Restaurant ID: ${rid}`);
+    console.log(`🔎📃  Menu info attached and mapped for Restaurant ID:\n${rid}`);
 
     return c.json({
       menuPages,
@@ -203,10 +221,22 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
     // This array will assemble all atomic actions for the single-table transaction block
     const transactionItems: any[] = [];
 
+        const presignedUrls: PresignedUrlMapping[] = [];
+
+    // Resolve structural patterns targeting local environments vs live AWS
+    // const isLocal = process.env.NODE_ENV === "development" || !!process.env.LOCALSTACK_ENDPOINT;
+    // const s3BaseUrl = isLocal 
+    //   ? `http://localhost:4566/${BUCKET_NAME}`
+    //   : `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION || "us-east-1"}.amazonaws.com`;
+    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`
+
+    console.log(`🔎📃  Pages received:\n${JSON.stringify(menuPages, null, 2)}`);
+
     // 📃 PROCESS MENU PAGES
     for (const page of menuPages) {
       const pageId = page.pageId;
       const action = page.action; // Expects "save" (create/update) or "delete"
+
       const sk = `RESOURCE#MENU#${pageId}`;
 
       if (action === "delete") {
@@ -216,41 +246,61 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
             Key: { PK: `REST#${rid}`, SK: sk }
           }
         });
-      } else if (action === "save") {
-        transactionItems.push({
-          Put: {
-            TableName: TABLE_NAME,
-            Item: {
-              PK: `REST#${rid}`,
-              SK: sk,
-              pageNumber: Number(page.pageNumber || 0),
-              /**
-                        * 💡 HINT FOR SIGNED URL TRANSITION:
-                        * For now, we take the raw imageUrl. When migrating to pre-signed URLs, 
-                        * strip the S3 domain/base path and store ONLY the S3 object key string here
-                        * (e.g., page.imageUrl -> "restaurants/uuid/menus/page1.jpg").
-                        */
-              imageUrl: page.imageUrl
-            }
-          }
+      } else if (action === "save" || action === "update") {  //TODO: Add checking to avoid to images with the same page number 
+        // 🔒 SECURITY STRATEGY: Generate a secure, predictable key coordinate path inside S3
+        // const s3Key = `restaurants/${rid}/menus/${pageId}.webp`;
+        const s3Key = `menus/${pageId}.webp`;
+        
+        // Form the static, permanent URL that your frontend application will use to pull/view images
+        const publicUrl = `${s3BaseUrl}/${s3Key}`;
+        console.log('🔎  publicUrl', publicUrl)
+
+        // 🛠️ ASSET SEPARATED HANDSHAKE CHECK: Craft a temporary cryptographic upload token signature URL
+        const uploadUrl = await getSignedUrl(
+          s3Client,
+          new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: s3Key,
+            ContentType: "image/webp" // Enforces binary media type constraints
+          }),
+          { expiresIn: 900 } // URL token token expires safely in 15 minutes
+        );
+
+        console.log('🔎  uploadUrl', uploadUrl)
+
+        // Map token configurations to match your "SyncDataFirstResponse" response payload design
+        presignedUrls.push({
+          pageId,
+          uploadUrl,
+          publicUrl
         });
-      }
-      else if (action === "update") {
-        transactionItems.push({
-          Update: {
-            TableName: TABLE_NAME,
-            Key: { 
-              PK: `REST#${rid}`, 
-              SK: sk 
-            },
-            // 📝 UpdateExpression targets only the specific fields modified
-            UpdateExpression: "SET pageNumber = :pageNumber, imageUrl = :imageUrl",
-            ExpressionAttributeValues: {
-              ":pageNumber": Number(page.pageNumber || 0),
-              ":imageUrl": page.imageUrl
+
+        if (action === "save") {
+          transactionItems.push({
+            Put: {
+              TableName: TABLE_NAME,
+              Item: {
+                PK: `REST#${rid}`,
+                SK: sk,
+                pageNumber: Number(page.pageNumber || 0),
+                imageUrl: publicUrl // 🎯 Overwritten with the final public reading URL string destination
+              }
             }
-          }
-        });
+          });
+        } 
+        else if (action === "update") {
+          transactionItems.push({
+            Update: {
+              TableName: TABLE_NAME,
+              Key: { PK: `REST#${rid}`, SK: sk },
+              UpdateExpression: "SET pageNumber = :pageNumber, imageUrl = :imageUrl", //TODO: later it will need dynamic parameters (like the update of dishes) when individual
+              ExpressionAttributeValues: {
+                ":pageNumber": Number(page.pageNumber || 0),
+                ":imageUrl": publicUrl // 🎯 Overwritten with the final public reading URL string destination
+              }
+            }
+          });
+        }
       }
     }
 
@@ -319,7 +369,7 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
             expressions.push(`${dbField} = :${clientKey}`);
             
             // Ensure proper numeric cast primitives for numbers
-            if (clientKey === "priceCents" || clientKey === "prepTime" || clientKey === "coordinateXInMenu" || clientKey === "coordinateYInMenu") {
+            if (["priceCents", "prepTime", "coordinateXInMenu", "coordinateYInMenu"].includes(clientKey)) {
               expressionAttributeValues[`:${clientKey}`] = Number(payloadSource[clientKey]);
             } 
             else if (clientKey === "isOutOfStock"){
@@ -345,6 +395,8 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
       }
     }
 
+    console.log(`🔎📃  Data to be transacted:\n${JSON.stringify(transactionItems, null, 2)}`);
+
     // Edge case: If client sent an empty mutation array package
     if (transactionItems.length === 0) {
       return c.json({ message: "No menu or dish mutations provided." }, 200);
@@ -360,8 +412,14 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
       TransactItems: transactionItems
     }));
 
+    // 🎯 OUTPUT: Enforce formatting structure to output "SyncDataFirstResponse"
+    const responsePayload: SyncDataFirstResponse = {
+      message: "Menu state successfully synchronized atomically",
+      presignedUrls
+    };
+
     console.log(`✅⤴️ TransactWrite completed: Synchronized menu states for Restaurant: ${rid}`);
-    return c.json({ message: "Menu state successfully synchronized atomically" }, 200);
+    return c.json(responsePayload, 200);
 
   } catch (error: any) {
     console.error(`🚨 SYNC MENU ROUTE ERROR -> ${error.message}`);

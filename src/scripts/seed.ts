@@ -107,19 +107,21 @@ async function seedData() {
     }
   }
 
+  const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`
+
   console.log("\n⚡ Populating DynamoDB Single-Table Records...");
 
   // 🏪 4. CONSTRUCT RESTAURANTS & RECURSIVE SUB-RESOURCES
   for (let i = 0; i < logoImageKeys.length; i++) {
     const rid = restaurantUuids[i];
-    const logoImageKey = logoImageKeys[i];
+    const logoImageUrl = `${s3BaseUrl}/${logoImageKeys[i]}`;
     const dishImageUrlsToShow: string[] = [];
 
     const totalMenusForRestaurant = getRandomInt(2, 3);
 
     for (let mIdx = 0; mIdx < totalMenusForRestaurant; mIdx++) {
       const someMenuIndex = getRandomInt(0, menuUuids.length - 1);
-      const menuImageUrl = menuImageKeys[someMenuIndex];
+      const menuImageUrl = `${s3BaseUrl}/${menuImageKeys[someMenuIndex]}`;
       const itsDishesCoordinates = dishesCoordinates[someMenuIndex] || dishesCoordinates[0];
 
       // Generate menu unique resource identifier
@@ -139,7 +141,7 @@ async function seedData() {
       // 🍽️ Generate Coordinates-linked Dishes
       for (const dishCoordinates of itsDishesCoordinates) {
         const did = crypto.randomUUID();
-        const dishImageUrl = getRandomItem(foodImageKeys);
+        const dishImageUrl = `${s3BaseUrl}/${getRandomItem(foodImageKeys)}`;
 
         if (Math.random() < 0.2) {
           dishImageUrlsToShow.push(dishImageUrl);
@@ -181,7 +183,7 @@ async function seedData() {
         PK: `REST#${rid}`,
         SK: "METADATA",
         name: `Gourmet Hub ${i}`,
-        logoUrl: logoImageKey,
+        logoUrl: logoImageUrl,
         cityID: "NYC",
         latitude: -12.122,
         longitude: -77.028,
@@ -202,7 +204,7 @@ async function seedData() {
       }
     }));
 
-    console.log(`🏪 Restaurant Gourmet Hub ${i} (${logoImageKey}) indexed into User Section -> [${targetSection}]\n`);
+    console.log(`🏪 Restaurant Gourmet Hub ${i} (${logoImageUrl}) indexed into User Section -> [${targetSection}]\n`);
   }
 
   console.log("-----------------------------------------------------------");

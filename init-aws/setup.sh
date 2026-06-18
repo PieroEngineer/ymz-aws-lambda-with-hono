@@ -26,6 +26,21 @@ awslocal dynamodb create-table \
 echo "🪣 Creating S3 Bucket for Assets..."
 awslocal s3 mb s3://$BUCKET_NAME --region $REGION
 
+echo "🔒 Applying CORS permissions to S3 Bucket..."
+awslocal s3api put-bucket-cors \
+  --bucket $BUCKET_NAME \
+  --cors-configuration '{
+    "CORSRules": [
+      {
+        "AllowedHeaders": ["*"],
+        "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+        "AllowedOrigins": ["*"],
+        "ExposeHeaders": ["ETag"]
+      }
+    ]
+  }' \
+  --region $REGION
+
 # 3. Dummy Placeholder Lambda Creation
 echo "⚡ Provisioning Modular Lambda Routing Pipeline..."
 mkdir -p /tmp/dummy-lambda
