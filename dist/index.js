@@ -2753,7 +2753,8 @@ ${JSON.stringify(menuPages, null, 2)}`);
         });
       } else if (action === "save" || action === "update") {
         const s3Key = `menus/${pageId}.webp`;
-        const publicUrl = `${s3BaseUrl}/${s3Key}`;
+        const unixEpoch = Math.floor(Date.now() / 1e3);
+        const publicUrl = `${s3BaseUrl}/${s3Key}?v=${unixEpoch}`;
         console.log("\u{1F50E}  publicUrl", publicUrl);
         const uploadUrl = await getSignedUrl(
           s3Client,
@@ -2780,25 +2781,42 @@ ${JSON.stringify(menuPages, null, 2)}`);
                 PK: `REST#${rid}`,
                 SK: sk,
                 pageNumber: Number(page.pageNumber || 0),
+                /// Take care with that "0"
                 imageUrl: publicUrl
                 // 🎯 Overwritten with the final public reading URL string destination
               }
             }
           });
         } else if (action === "update") {
-          transactionItems.push({
-            Update: {
-              TableName: TABLE_NAME2,
-              Key: { PK: `REST#${rid}`, SK: sk },
-              UpdateExpression: "SET pageNumber = :pageNumber, imageUrl = :imageUrl",
-              //TODO: later it will need dynamic parameters (like the update of dishes) when individual
-              ExpressionAttributeValues: {
-                ":pageNumber": Number(page.pageNumber || 0),
-                ":imageUrl": publicUrl
-                // 🎯 Overwritten with the final public reading URL string destination
+          const fieldMapping = {
+            imageUrl: "imageUrl",
+            pageNumber: "pageNumber"
+          };
+          const payloadSource = page.updatedFields;
+          const expressions = [];
+          const expressionAttributeValues = {};
+          for (const [clientKey, dbField] of Object.entries(fieldMapping)) {
+            if (payloadSource[clientKey] !== void 0) {
+              expressions.push(`${dbField} = :${clientKey}`);
+              if (["pageNumber"].includes(clientKey)) {
+                expressionAttributeValues[`:${clientKey}`] = Number(payloadSource[clientKey]);
+              } else if (clientKey === "imageUrl") {
+                expressionAttributeValues[`:${clientKey}`] = publicUrl;
+              } else {
+                expressionAttributeValues[`:${clientKey}`] = payloadSource[clientKey];
               }
             }
-          });
+          }
+          if (expressions.length > 0) {
+            transactionItems.push({
+              Update: {
+                TableName: TABLE_NAME2,
+                Key: { PK: `REST#${rid}`, SK: sk },
+                UpdateExpression: `SET ${expressions.join(", ")}`,
+                ExpressionAttributeValues: expressionAttributeValues
+              }
+            });
+          }
         }
       }
     }
@@ -2851,7 +2869,7 @@ ${JSON.stringify(menuPages, null, 2)}`);
           isOutOfStock: "isOutOfStock",
           imageUrl: "imageUrl"
         };
-        const payloadSource = dish.updatedFields || dish;
+        const payloadSource = dish.updatedFields;
         const expressions = [];
         const expressionAttributeValues = {};
         for (const [clientKey, dbField] of Object.entries(fieldMapping)) {

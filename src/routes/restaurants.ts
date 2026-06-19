@@ -180,6 +180,7 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
           });
         } else{
           console.log(`🚨  There was an issue with the price or preparation time of ${sk.replace("RESOURCE#DISH#", "")} | Fallback: pin is not sent`);
+          //TODO: Include a response's attribute that says what and why certain dishes were not saved remotely (Use a small "code" of the why to reduce the payload weight)
         }
       }
     }
@@ -250,9 +251,12 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
         // 🔒 SECURITY STRATEGY: Generate a secure, predictable key coordinate path inside S3
         // const s3Key = `restaurants/${rid}/menus/${pageId}.webp`;
         const s3Key = `menus/${pageId}.webp`;
-        
-        // Form the static, permanent URL that your frontend application will use to pull/view images
-        const publicUrl = `${s3BaseUrl}/${s3Key}`;
+
+        // 🕒 CACHE BUSTING: Generate a standard Unix epoch timestamp (in seconds)
+        const unixEpoch = Math.floor(Date.now() / 1000);
+
+        // 🎯 COMBINED SOLUTION: The database saves the static path + the dynamic timestamp version parameter
+        const publicUrl = `${s3BaseUrl}/${s3Key}?v=${unixEpoch}`;
         console.log('🔎  publicUrl', publicUrl)
 
         // 🛠️ ASSET SEPARATED HANDSHAKE CHECK: Craft a temporary cryptographic upload token signature URL
@@ -282,24 +286,55 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
               Item: {
                 PK: `REST#${rid}`,
                 SK: sk,
-                pageNumber: Number(page.pageNumber || 0),
+                pageNumber: Number(page.pageNumber || 0), /// Take care with that "0"
                 imageUrl: publicUrl // 🎯 Overwritten with the final public reading URL string destination
               }
             }
           });
         } 
         else if (action === "update") {
+
+          // 🧠 DYNAMIC COMPILER ENGINE
+          // Map client field names to their specific DynamoDB attribute counterparts
+          const fieldMapping: Record<string, string> = {
+            imageUrl: "imageUrl",
+            pageNumber: "pageNumber"
+          };
+
+          // Extract the target payload block (checks flat attributes first, falls back to an inner updatedFields map if structured that way)
+          const payloadSource = page.updatedFields;
+
+          const expressions: string[] = [];
+          const expressionAttributeValues: Record<string, any> = {};
+
+          // Only add things to the update execution parameters if the client explicitly sent them
+          for (const [clientKey, dbField] of Object.entries(fieldMapping)) {
+            if (payloadSource[clientKey] !== undefined) {
+              expressions.push(`${dbField} = :${clientKey}`);
+              
+              // Ensure proper numeric cast primitives for numbers
+              if (["pageNumber"].includes(clientKey)) {
+                expressionAttributeValues[`:${clientKey}`] = Number(payloadSource[clientKey]);
+              }
+              else if (clientKey === "imageUrl"){
+                expressionAttributeValues[`:${clientKey}`] = publicUrl;
+              }
+              else {
+                expressionAttributeValues[`:${clientKey}`] = payloadSource[clientKey];
+              }
+            }
+          }
+
+          if (expressions.length > 0) {
           transactionItems.push({
             Update: {
               TableName: TABLE_NAME,
               Key: { PK: `REST#${rid}`, SK: sk },
-              UpdateExpression: "SET pageNumber = :pageNumber, imageUrl = :imageUrl", //TODO: later it will need dynamic parameters (like the update of dishes) when individual
-              ExpressionAttributeValues: {
-                ":pageNumber": Number(page.pageNumber || 0),
-                ":imageUrl": publicUrl // 🎯 Overwritten with the final public reading URL string destination
-              }
+              UpdateExpression: `SET ${expressions.join(", ")}`,
+              ExpressionAttributeValues: expressionAttributeValues
             }
           });
+        }
         }
       }
     }
@@ -358,7 +393,7 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
         };
 
         // Extract the target payload block (checks flat attributes first, falls back to an inner updatedFields map if structured that way)
-        const payloadSource = dish.updatedFields || dish;
+        const payloadSource = dish.updatedFields;
 
         const expressions: string[] = [];
         const expressionAttributeValues: Record<string, any> = {};
