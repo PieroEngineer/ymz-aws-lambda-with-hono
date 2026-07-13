@@ -170,12 +170,13 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
             id: sk.replace("RESOURCE#DISH#", ""),
             name: item.dishName,
             imageUrl: item.dishImageUrl || "",
-            priceCents: Number(item.priceCents),
+            priceCents: Number(item.priceCents),  /// Does it work without "Number" parser?
             prepTime: Number(item.prepTime),
             isOutOfStock: Boolean(item.isOutOfStock || false),
             menuPageId: item.menuPageId,
             coordinateXInMenu: item.coordinateXInMenu,
             coordinateYInMenu: item.coordinateYInMenu,
+            createdAt: item.createdAt,
             description: item.description || ""
           });
         } else{

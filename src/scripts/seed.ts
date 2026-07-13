@@ -81,8 +81,8 @@ async function seedData() {
   const menuUuids: string[] = readJsonFile("my_uuids/menu_uuids.json");
 
   // ✂️ Reducing amount of elements
-  const logoImageKeys = logoImageKeys_.slice(0, 2);
-  const restaurantUuids = restaurantUuids_.slice(0, 2);
+  const logoImageKeys = logoImageKeys_.slice(0, 1);
+  const restaurantUuids = restaurantUuids_.slice(0, 1);
 
   // 🚨 DATA VALIDATION SAFEGUARDS
   if (menuImageKeys.length !== dishesCoordinates.length) {
@@ -163,7 +163,8 @@ async function seedData() {
             menuPageId: mid,
             coordinateXInMenu: dishCoordinates[0],
             coordinateYInMenu: dishCoordinates[1],
-            description: "The most beautiful thing in a dish",
+            createdAt: Date.now(),
+            description: "The most beautiful thing in a dish"
           }
         }));
 

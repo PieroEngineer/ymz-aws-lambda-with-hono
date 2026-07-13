@@ -100,8 +100,5 @@ echo "🔗 Unified Base URL: http://localhost:4566/_aws/execute-api/$API_ID/$STA
 echo "💡 Use this Base URL for your mobile app! Add any route at the end: /feed, /requests, etc."
 echo "-----------------------------------------------------------"
 
-# 📋 AUTOMATION: Pipe the ID straight into your Windows Clipboard!
-if command -v clip.exe &> /dev/null; then
-    echo -n "$API_ID" | clip.exe
-    echo "✨ API ID has been automatically copied to your Windows Clipboard! Just press Ctrl+V in your app."
-fi
+# Pastung the ID
+echo "$API_ID" > /etc/localstack/init/ready.d/api_id.txt

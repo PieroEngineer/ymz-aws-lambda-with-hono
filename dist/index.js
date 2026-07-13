@@ -2489,7 +2489,7 @@ var isContentEncodingBinary = (contentEncoding) => {
 };
 
 // src/routes/requests.ts
-import { PutCommand, UpdateCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand, PutCommand, UpdateCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 
 // src/aws/clientFactory.ts
 import { S3Client } from "@aws-sdk/client-s3";
@@ -2538,24 +2538,83 @@ requestsRouter.post("/create", async (c) => {
     const rid = body.restaurantId;
     const uid = body.userId;
     const req_id = body.requestId;
-    if (!rid || !uid) {
-      return c.json({ error: "Missing restaurantId or userId" }, 400);
+    if (!rid || !uid || !req_id) {
+      return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
     }
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const newRequestItem = {
       PK: `REST#${rid}`,
       SK: `REQ#${req_id}`,
       userId: uid,
-      state: "Queued",
+      state: "QUEUED",
       onQueuedTimestamp: now
     };
     await docClient.send(new PutCommand({
       TableName: TABLE_NAME,
       Item: newRequestItem
     }));
+    const clientPayload = {
+      requestId: req_id,
+      title: "Mesa 4",
+      // Hardcoded target identifier label
+      type: "QUEUED",
+      // Hardcoded example enum value matching TableRequestType
+      createdAt: now,
+      referenceTimeMinutes: 0,
+      // Freshly created, relative offset is exactly zero minutes
+      info: [
+        { label: "Cliente ID", value: uid.substring(0, 8) },
+        { label: "Detalle", value: "Solicita asistencia del mozo en mesa." }
+      ],
+      statusText: "En Espera"
+    };
+    const temporalHardcodedId = "4258e0fa-6b3c-43bc-a6d8-82c5835d608d";
+    const apiKey = process.env.ABLY_API_KEY;
+    if (!apiKey) {
+      throw new Error("ABLY_API_KEY is not defined");
+    }
+    const [username, password] = apiKey.split(":");
+    const credentials = btoa(`${username}:${password}`);
+    const channelName = `restaurant:${temporalHardcodedId}:ops`;
+    const requestName = "table-requested";
+    const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
+    let ablyDispatchSuccess = false;
+    let attempts = 0;
+    const maxAttempts = 3;
+    while (!ablyDispatchSuccess && attempts < maxAttempts) {
+      try {
+        attempts++;
+        const ablyResponse = await fetch(ablyEndpoint, {
+          method: "POST",
+          headers: {
+            "Authorization": `Basic ${credentials}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            name: requestName,
+            // The targeted subscriber frequency path matching mock constraints
+            data: clientPayload
+            // The exact TableRequestPayload DTO shape your staff app consumes
+          })
+        });
+        if (ablyResponse.ok) {
+          ablyDispatchSuccess = true;
+          console.log(`\u{1F4E1} [Attempt ${attempts}] Successfully broadcast table request event to Ably channel: ${channelName}`);
+          console.log(`\u{1F50E}  Data to send: ${JSON.stringify({ name: "table-requested", data: clientPayload }, null, 2)}`);
+        } else {
+          console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Mock Ably returned a status error code: ${ablyResponse.status}`);
+        }
+      } catch (netErr) {
+        console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Network failure transmitting data payload to mock Ably server: ${netErr.message}`);
+      }
+    }
+    if (!ablyDispatchSuccess) {
+      console.error(`\u{1F6A8} CRITICAL: Failed to stream real-time broadcast alert data past ${maxAttempts} attempts. Database state remains fully valid.`);
+    }
     return c.json({
-      message: "Request created successfully",
-      requestId: req_id
+      message: "Request created successfully and broadcast state synchronized",
+      requestId: req_id,
+      realtimeNotified: ablyDispatchSuccess
     }, 201);
   } catch (error) {
     console.error(`\u{1F6A8} CREATE REQ ERROR: ${error.message}`);
@@ -2596,9 +2655,55 @@ requestsRouter.post("/:requestId/cancel", async (c) => {
     return c.json({ error: "Internal Server Error" }, 500);
   }
 });
+requestsRouter.get("/:restaurantId", async (c) => {
+  try {
+    const rid = c.req.param("restaurantId");
+    if (!rid) {
+      return c.json({ error: "Missing restaurantId parameter" }, 400);
+    }
+    const queryParams = {
+      TableName: TABLE_NAME,
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+      ExpressionAttributeValues: {
+        ":pk": `REST#${rid}`,
+        ":skPrefix": "REQ#"
+      }
+    };
+    const dbResult = await docClient.send(new QueryCommand(queryParams));
+    const rawItems = dbResult.Items || [];
+    const mappedPayloads = rawItems.map((item) => {
+      const requestId = item.SK.replace("REQ#", "");
+      const createdAtISO = item.onQueuedTimestamp || (/* @__PURE__ */ new Date()).toISOString();
+      const createdTimeMs = new Date(createdAtISO).getTime();
+      const nowMs = (/* @__PURE__ */ new Date()).getTime();
+      const diffMinutes = Math.max(0, Math.floor((nowMs - createdTimeMs) / 6e4));
+      return {
+        // TODO: It shouldn't hardcode items here. After repair the TODO(#1), assign the "item"'s attributes of "rawItems" here directly
+        requestId,
+        title: "Mesa 4",
+        // Hardcoded target placeholder for now
+        type: "QUEUED",
+        // Hardcoded example enum value matching TableRequestType
+        createdAt: createdAtISO,
+        referenceTimeMinutes: diffMinutes,
+        // Dynamic relative offset calculation
+        info: [
+          { label: "Cliente ID", value: String(item.userId).substring(0, 8) },
+          { label: "Estado", value: `El cliente est\xE1 en espera en la mesa.` }
+        ],
+        statusText: "En Espera"
+      };
+    });
+    console.log(`\u{1F50D} Initialized UI state feed: Found ${mappedPayloads.length} active table requests for Restaurant: ${rid}`);
+    return c.json(mappedPayloads, 200);
+  } catch (error) {
+    console.error(`\u{1F6A8} FETCH ACTIVE REQS ERROR: ${error.message}`);
+    return c.json({ error: error.message || "Internal Server Error" }, 500);
+  }
+});
 
 // src/routes/restaurants.ts
-import { QueryCommand, BatchGetCommand, DynamoDBDocumentClient as DynamoDBDocumentClient2 } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand as QueryCommand2, BatchGetCommand, DynamoDBDocumentClient as DynamoDBDocumentClient2 } from "@aws-sdk/lib-dynamodb";
 import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -2616,7 +2721,7 @@ restaurantsRouter.get("/feed", async (c) => {
       return c.json({ error: "Missing userId" }, 400);
     }
     const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`;
-    const feedLinksResponse = await docClient2.send(new QueryCommand({
+    const feedLinksResponse = await docClient2.send(new QueryCommand2({
       TableName: TABLE_NAME2,
       KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
       ExpressionAttributeValues: {
@@ -2674,7 +2779,7 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
       return c.json({ error: "restaurantId is required" }, 400);
     }
     const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`;
-    const response = await docClient2.send(new QueryCommand({
+    const response = await docClient2.send(new QueryCommand2({
       TableName: TABLE_NAME2,
       KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
       ExpressionAttributeValues: {
@@ -2701,11 +2806,13 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
             name: item.dishName,
             imageUrl: item.dishImageUrl || "",
             priceCents: Number(item.priceCents),
+            /// Does it work without "Number" parser?
             prepTime: Number(item.prepTime),
             isOutOfStock: Boolean(item.isOutOfStock || false),
             menuPageId: item.menuPageId,
             coordinateXInMenu: item.coordinateXInMenu,
             coordinateYInMenu: item.coordinateYInMenu,
+            createdAt: item.createdAt,
             description: item.description || ""
           });
         } else {
