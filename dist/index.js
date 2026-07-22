@@ -2489,7 +2489,7 @@ var isContentEncodingBinary = (contentEncoding) => {
 };
 
 // src/routes/requests.ts
-import { QueryCommand, PutCommand, UpdateCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand, PutCommand, UpdateCommand, DynamoDBDocumentClient, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 
 // src/aws/clientFactory.ts
 import { S3Client } from "@aws-sdk/client-s3";
@@ -2526,6 +2526,9 @@ var getDynamoDBClient = () => {
   return new DynamoDBClient({ region: awsRegion });
 };
 
+// src/k.ts
+var ablyKeyWS = "4w64MA.R_FXWQ:2BlLaKwCQu5o2R6EoCt9RwNcoGNHIxOWs9pPFodpMhQ";
+
 // src/routes/requests.ts
 var docClient = DynamoDBDocumentClient.from(getDynamoDBClient(), {
   marshallOptions: { removeUndefinedValues: true }
@@ -2535,47 +2538,47 @@ var requestsRouter = new Hono2();
 requestsRouter.post("/create", async (c) => {
   try {
     const body = await c.req.json().catch(() => ({}));
-    const rid = body.restaurantId;
-    const uid = body.userId;
-    const req_id = body.requestId;
-    if (!rid || !uid || !req_id) {
+    const restaurantId = body.restaurantId;
+    const userId = body.userId;
+    const requestId = body.requestId;
+    const groupSize = body.groupSize;
+    const userName = body.userName;
+    const arrivalTime = body.arrivalTime;
+    if (!restaurantId || !userId || !requestId) {
       return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
     }
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const newRequestItem = {
-      PK: `REST#${rid}`,
-      SK: `REQ#${req_id}`,
-      userId: uid,
+    const requestTime = Date.now();
+    const mockUserSpecifics = ["special day", "with vehicule"];
+    const baseRequestInfo = {
+      userId,
+      userName,
+      groupSize,
+      onQueuedTimestamp: requestTime,
       state: "QUEUED",
-      onQueuedTimestamp: now
+      specifics: mockUserSpecifics,
+      arrivlaTime: arrivalTime
     };
+    const newRequestItem = {
+      PK: `REST#${restaurantId}`,
+      SK: `REQ#${requestId}`,
+      ...baseRequestInfo
+    };
+    console.log("\u{1F4BD}  Item to save in DynamoDB", JSON.stringify(newRequestItem, null, 2), "\nfor restaurant ", restaurantId);
     await docClient.send(new PutCommand({
       TableName: TABLE_NAME,
       Item: newRequestItem
     }));
     const clientPayload = {
-      requestId: req_id,
-      title: "Mesa 4",
-      // Hardcoded target identifier label
-      type: "QUEUED",
-      // Hardcoded example enum value matching TableRequestType
-      createdAt: now,
-      referenceTimeMinutes: 0,
-      // Freshly created, relative offset is exactly zero minutes
-      info: [
-        { label: "Cliente ID", value: uid.substring(0, 8) },
-        { label: "Detalle", value: "Solicita asistencia del mozo en mesa." }
-      ],
-      statusText: "En Espera"
+      requestId,
+      ...baseRequestInfo
     };
-    const temporalHardcodedId = "4258e0fa-6b3c-43bc-a6d8-82c5835d608d";
-    const apiKey = process.env.ABLY_API_KEY;
+    const apiKey = ablyKeyWS;
     if (!apiKey) {
       throw new Error("ABLY_API_KEY is not defined");
     }
     const [username, password] = apiKey.split(":");
     const credentials = btoa(`${username}:${password}`);
-    const channelName = `restaurant:${temporalHardcodedId}:ops`;
+    const channelName = `restaurant:${restaurantId}:ops`;
     const requestName = "table-requested";
     const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
     let ablyDispatchSuccess = false;
@@ -2600,7 +2603,7 @@ requestsRouter.post("/create", async (c) => {
         if (ablyResponse.ok) {
           ablyDispatchSuccess = true;
           console.log(`\u{1F4E1} [Attempt ${attempts}] Successfully broadcast table request event to Ably channel: ${channelName}`);
-          console.log(`\u{1F50E}  Data to send: ${JSON.stringify({ name: "table-requested", data: clientPayload }, null, 2)}`);
+          console.log(`\u{1F4E6}  Data to send: ${JSON.stringify({ name: requestName, data: clientPayload }, null, 2)}`);
         } else {
           console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Mock Ably returned a status error code: ${ablyResponse.status}`);
         }
@@ -2613,7 +2616,7 @@ requestsRouter.post("/create", async (c) => {
     }
     return c.json({
       message: "Request created successfully and broadcast state synchronized",
-      requestId: req_id,
+      requestId,
       realtimeNotified: ablyDispatchSuccess
     }, 201);
   } catch (error) {
@@ -2623,27 +2626,23 @@ requestsRouter.post("/create", async (c) => {
 });
 requestsRouter.post("/:requestId/cancel", async (c) => {
   try {
-    const request_id = c.req.param("requestId");
+    const requestId = c.req.param("requestId");
     const body = await c.req.json().catch(() => ({}));
-    const restaurant_id = body.restaurantId;
-    if (!request_id || !restaurant_id) {
+    const restaurantId = body.restaurantId;
+    if (!requestId || !restaurantId) {
       return c.json({ error: "Missing requestId or restaurantId" }, 400);
     }
-    const pk = `REST#${restaurant_id}`;
-    const sk = `REQ#${request_id}`;
+    const pk = `REST#${restaurantId}`;
+    const sk = `REQ#${requestId}`;
     const timestamp = (/* @__PURE__ */ new Date()).toISOString();
-    await docClient.send(new UpdateCommand({
+    await docClient.send(new DeleteCommand({
+      // TODO: This is temporal  code and should be alternated with the commented code that is just above
       TableName: TABLE_NAME,
-      Key: { PK: pk, SK: sk },
-      UpdateExpression: "SET onCancellationTimestamp = :ts",
-      ConditionExpression: "attribute_not_exists(onPaidTimestamp)",
-      ExpressionAttributeValues: {
-        ":ts": timestamp
-      }
+      Key: { PK: pk, SK: sk }
     }));
     return c.json({
-      message: "Request cancelled successfully",
-      onCancellationTimestamp: timestamp
+      message: "Request cancelled successfully"
+      // onCancellationTimestamp: timestamp
     }, 200);
   } catch (error) {
     if (error.name === "ConditionalCheckFailedException") {
@@ -2671,33 +2670,102 @@ requestsRouter.get("/:restaurantId", async (c) => {
     };
     const dbResult = await docClient.send(new QueryCommand(queryParams));
     const rawItems = dbResult.Items || [];
+    console.log(`\u{1F50D} Raw data to respond the GET request 
+${JSON.stringify(rawItems)} 
+For Restaurant: ${rid}`);
     const mappedPayloads = rawItems.map((item) => {
       const requestId = item.SK.replace("REQ#", "");
-      const createdAtISO = item.onQueuedTimestamp || (/* @__PURE__ */ new Date()).toISOString();
-      const createdTimeMs = new Date(createdAtISO).getTime();
-      const nowMs = (/* @__PURE__ */ new Date()).getTime();
-      const diffMinutes = Math.max(0, Math.floor((nowMs - createdTimeMs) / 6e4));
       return {
-        // TODO: It shouldn't hardcode items here. After repair the TODO(#1), assign the "item"'s attributes of "rawItems" here directly
         requestId,
-        title: "Mesa 4",
-        // Hardcoded target placeholder for now
-        type: "QUEUED",
-        // Hardcoded example enum value matching TableRequestType
-        createdAt: createdAtISO,
-        referenceTimeMinutes: diffMinutes,
-        // Dynamic relative offset calculation
-        info: [
-          { label: "Cliente ID", value: String(item.userId).substring(0, 8) },
-          { label: "Estado", value: `El cliente est\xE1 en espera en la mesa.` }
-        ],
-        statusText: "En Espera"
+        userId: item.userId,
+        userName: item.userName,
+        groupSize: item.groupSize,
+        onQueuedTimestamp: item.onQueuedTimestamp,
+        state: item.state,
+        specifics: item.specifics,
+        arrivlaTime: item.arrivlaTime
+        // TODO: Correct the name
       };
     });
-    console.log(`\u{1F50D} Initialized UI state feed: Found ${mappedPayloads.length} active table requests for Restaurant: ${rid}`);
+    console.log(`1\uFE0F\u20E3\u{1F4E6}  Initialized UI state feed: Found 
+${JSON.stringify(mappedPayloads)} 
+For Restaurant: ${rid}`);
     return c.json(mappedPayloads, 200);
   } catch (error) {
     console.error(`\u{1F6A8} FETCH ACTIVE REQS ERROR: ${error.message}`);
+    return c.json({ error: error.message || "Internal Server Error" }, 500);
+  }
+});
+requestsRouter.post("/:restaurantId/update", async (c) => {
+  try {
+    const restaurantId = c.req.param("restaurantId");
+    const body = await c.req.json().catch(() => ({}));
+    const requestId = body.requestId;
+    const newState = body.newState;
+    const userId = body.userId;
+    console.log(`1\uFE0F\u20E3\u{1F4E6}  Data arrived from restaurant ${restaurantId} 
+${JSON.stringify(body)}`);
+    if (!restaurantId || !requestId || !newState) {
+      return c.json({ error: "Missing restaurantId, requestId, or newState" }, 400);
+    }
+    const pk = `REST#${restaurantId}`;
+    const sk = `REQ#${requestId}`;
+    const normalizedState = String(newState);
+    await docClient.send(new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: pk, SK: sk },
+      UpdateExpression: "SET #state = :state",
+      ExpressionAttributeNames: {
+        "#state": "state"
+      },
+      ExpressionAttributeValues: {
+        ":state": normalizedState
+      }
+    }));
+    const apiKey = ablyKeyWS;
+    let realtimeNotified = false;
+    if (apiKey) {
+      const [username, password] = apiKey.split(":");
+      const credentials = btoa(`${username}:${password}`);
+      const channelName = `request:${userId}`;
+      console.log(`1\uFE0F\u20E3\u{1F4FA}  Channel to subscrive ${channelName}`);
+      const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
+      try {
+        const ablyResponse = await fetch(ablyEndpoint, {
+          method: "POST",
+          headers: {
+            "Authorization": `Basic ${credentials}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            name: "request-status-updated",
+            data: {
+              // TODO: Move this to an object like above
+              restaurantId,
+              newStatus: normalizedState
+            }
+          })
+        });
+        realtimeNotified = ablyResponse.ok;
+        if (!ablyResponse.ok) {
+          console.warn(`\u26A0\uFE0F Failed to broadcast request status update to Ably, status=${ablyResponse.status}`);
+        }
+      } catch (error) {
+        console.warn(`\u26A0\uFE0F Failed to broadcast request status update to Ably: ${error.message}`);
+      }
+    } else {
+      console.warn("\u26A0\uFE0F ABLY_API_KEY is not defined; skipping realtime broadcast.");
+    }
+    console.log(`\u{1F50E}  The post of the request update finished`);
+    return c.json({
+      message: "Request state updated successfully",
+      restaurantId,
+      requestId,
+      newState: normalizedState,
+      realtimeNotified
+    }, 200);
+  } catch (error) {
+    console.error(`\u{1F6A8} UPDATE REQ ERROR: ${error.message}`);
     return c.json({ error: error.message || "Internal Server Error" }, 500);
   }
 });
@@ -3027,7 +3095,7 @@ ${JSON.stringify(transactionItems, null, 2)}`);
 });
 
 // src/routes/users.ts
-import { PutCommand as PutCommand2, DeleteCommand, DynamoDBDocumentClient as DynamoDBDocumentClient3 } from "@aws-sdk/lib-dynamodb";
+import { PutCommand as PutCommand2, DeleteCommand as DeleteCommand2, DynamoDBDocumentClient as DynamoDBDocumentClient3 } from "@aws-sdk/lib-dynamodb";
 var docClient3 = DynamoDBDocumentClient3.from(getDynamoDBClient(), {
   marshallOptions: { removeUndefinedValues: true }
 });
@@ -3075,7 +3143,7 @@ usersRouter.delete("/:userId/preferences/:prefId", async (c) => {
     }
     const pk = `USER#${user_id}`;
     const sk = `PREF#${pref_id}`;
-    await docClient3.send(new DeleteCommand({
+    await docClient3.send(new DeleteCommand2({
       TableName: TABLE_NAME3,
       Key: { PK: pk, SK: sk }
     }));

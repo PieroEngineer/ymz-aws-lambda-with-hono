@@ -10,5 +10,3 @@ services:
     volumes:
       - "./init-aws:/etc/localstack/init/ready.d" # 🚀 Auto-runs initialization scripts
       - "/var/run/docker.sock:/var/run/docker.sock" # 🐳 Needed by LocalStack to run your future TS mock lambdas
-    env_file:
-      - .env.local

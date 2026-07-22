@@ -1,10 +1,7 @@
 import { Hono } from "hono";
-import { QueryCommand, PutCommand, UpdateCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand, PutCommand, UpdateCommand, DynamoDBDocumentClient, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { getDynamoDBClient } from "../aws/clientFactory.js";
-
-// 🌍 CONFIGURATION COORDINDATES FOR REUSE
-// In production, these will be read from process.env.ABLY_REST_URL
-const MOCK_ABLY_REST_URL = "http://host.docker.internal:8080";
+import { ablyKeyWS } from "../k.js";
 
 // 🔌 Wrap standard Dynamo client into Document Client for comfortable JSON mappings
 const docClient = DynamoDBDocumentClient.from(getDynamoDBClient(), {
@@ -24,52 +21,64 @@ requestsRouter.post("/create", async (c) => {
   try {
     // 📩 Parse input payload safely from Hono context body
     const body = await c.req.json().catch(() => ({}));
-    const rid = body.restaurantId;
-    const uid = body.userId;
-    const req_id = body.requestId; 
+    const restaurantId = body.restaurantId;
+    const userId = body.userId;
+    const requestId = body.requestId;   // TODO: It should be created in here, not in client
+    const groupSize = body.groupSize;        
+    const userName = body.userName;      
+    const arrivalTime = body.arrivalTime;      
 
-    if (!rid || !uid || !req_id) {
+    if (!restaurantId || !userId || !requestId) {
       return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
     }
 
-    const now = new Date().toISOString();
+    const requestTime =  Date.now()
 
-    // 📝 1. Match exact original Python dictionary structure for Database Ledger
-    const newRequestItem = {
-      PK: `REST#${rid}`,
-      SK: `REQ#${req_id}`,
-      userId: uid,
+    /// Mocks: They should be passed by the customer's request
+    const mockUserSpecifics = ['special day', 'with vehicule']
+    // const mockUserSpecifics = {  // TODO: Research how to implement in this way when details are added in the specifications (Maybe every detail could be a object's keys like "groupSize" or "state", and their value)
+    //     birthday: 'For julia',
+    //     baby: '2 babies'
+    //   }
+
+    // Base info
+    const baseRequestInfo = {
+      userId: userId,
+      userName: userName,
+      groupSize: groupSize,
+      onQueuedTimestamp: requestTime,
       state: "QUEUED",
-      onQueuedTimestamp: now,
+      specifics: mockUserSpecifics,
+      arrivlaTime: arrivalTime
+    }
 
+    // Match exact original structure for Database Ledger
+    const newRequestItem = {
+      PK: `REST#${restaurantId}`,
+      SK: `REQ#${requestId}`,
+
+      ...baseRequestInfo
     };
 
-    // ⚡ 2. Execute atomic database insertion (System of Record First!)
+    console.log('💽  Item to save in DynamoDB', JSON.stringify(newRequestItem , null, 2), '\nfor restaurant ', restaurantId);
+    
+    // Execute atomic database insertion (System of Record First!)
     await docClient.send(new PutCommand({
       TableName: TABLE_NAME,
       Item: newRequestItem,
     }));
 
-    // 🍔 3. CONSTRUCT TARGET CLIENT INTERFACE PAYLOAD ("TableRequestPayload" shape)
-    // Hardcoding default parameters for scenario testing simulation  //TODO(#1): This adaptation shouldn't be here, but in the restaurant app
+    // CONSTRUCT TARGET CLIENT INTERFACE PAYLOAD ("TableRequestPayload" shape)  
     const clientPayload = {
-      requestId: req_id,
-      title: "Mesa 4", // Hardcoded target identifier label
-      type: "QUEUED", // Hardcoded example enum value matching TableRequestType
-      createdAt: now,
-      referenceTimeMinutes: 0, // Freshly created, relative offset is exactly zero minutes
-      info: [
-        { label: "Cliente ID", value: uid.substring(0, 8) },
-        { label: "Detalle", value: "Solicita asistencia del mozo en mesa." }
-      ],
-      statusText: "En Espera"
+      requestId: requestId,
+
+      ...baseRequestInfo
     };
 
-    // 📡 4. EXECUTING FIRE-AND-FORGET MOCK ABLY DISPATCH (Side Effect Secondary)
+    // EXECUTING FIRE-AND-FORGET MOCK ABLY DISPATCH (Side Effect Secondary)
     // Wrapped inside a fast transient network retry loop block
 
-    const temporalHardcodedId = '4258e0fa-6b3c-43bc-a6d8-82c5835d608d'
-    const apiKey = process.env.ABLY_API_KEY;
+    const apiKey = ablyKeyWS;
 
     if (!apiKey) {
       throw new Error("ABLY_API_KEY is not defined");
@@ -78,14 +87,10 @@ requestsRouter.post("/create", async (c) => {
     const [username, password] = apiKey.split(':');
     const credentials = btoa(`${username}:${password}`);
 
-    // const ablyChannel = `restaurant:${rid}:ops`;  //restaurant:${restaurantId}:ops
-    const channelName = `restaurant:${temporalHardcodedId}:ops`;
+    const channelName = `restaurant:${restaurantId}:ops`;
     const requestName = 'table-requested'
     
     const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`
-
-    //Xconst ablyChannel = `restaurant:${temporalHardcodedId}:ops`;  //restaurant:${restaurantId}:ops
-    //X const localAblyEndpoint = `${MOCK_ABLY_REST_URL}/v1/apps/local-app/channels/${encodeURIComponent(ablyChannel)}/messages`;
 
     // We can extract this to an inline execution workflow
     let ablyDispatchSuccess = false;
@@ -110,7 +115,7 @@ requestsRouter.post("/create", async (c) => {
         if (ablyResponse.ok) {
           ablyDispatchSuccess = true;
           console.log(`📡 [Attempt ${attempts}] Successfully broadcast table request event to Ably channel: ${channelName}`);
-          console.log(`🔎  Data to send: ${JSON.stringify({name: "table-requested", data: clientPayload}, null, 2)}`);
+          console.log(`📦  Data to send: ${JSON.stringify({name: requestName, data: clientPayload}, null, 2)}`);
           
         } else {
           console.warn(`⚠️ [Attempt ${attempts}] Mock Ably returned a status error code: ${ablyResponse.status}`);
@@ -128,7 +133,7 @@ requestsRouter.post("/create", async (c) => {
     // 🎉 5. Success response utilizing Hono native JSON encoder
     return c.json({
       message: "Request created successfully and broadcast state synchronized",
-      requestId: req_id,
+      requestId: requestId,
       realtimeNotified: ablyDispatchSuccess
     }, 201);
 
@@ -145,39 +150,44 @@ requestsRouter.post("/create", async (c) => {
 requestsRouter.post("/:requestId/cancel", async (c) => {
   try {
     // 🗺️ Extract context routing path variables
-    const request_id = c.req.param("requestId");
+    const requestId = c.req.param("requestId");
     
     const body = await c.req.json().catch(() => ({}));
-    const restaurant_id = body.restaurantId;
+    const restaurantId = body.restaurantId;
 
-    if (!request_id || !restaurant_id) {
+    if (!requestId || !restaurantId) {
       return c.json({ error: "Missing requestId or restaurantId" }, 400);
     }
 
-    const pk = `REST#${restaurant_id}`;
-    const sk = `REQ#${request_id}`;
+    const pk = `REST#${restaurantId}`;
+    const sk = `REQ#${requestId}`;
     const timestamp = new Date().toISOString();
 
-    /**
-     * 🛡️ ATOMIC CONDITIONAL UPDATE
-     * 💡 HINT FOR FUTURE STATE-DRIVEN TODO FIX:
-     * To change this condition to rely on your state machine flow instead of timestamp checking,
-     * you can map the ConditionExpression to check against your allowed statuses:
-     * e.g., ConditionExpression: "#stateAttr = :queuedState OR #stateAttr = :processingState"
-     */
-    await docClient.send(new UpdateCommand({
+    // /**
+    //  * 🛡️ ATOMIC CONDITIONAL UPDATE
+    //  * 💡 HINT FOR FUTURE STATE-DRIVEN TODO FIX:
+    //  * To change this condition to rely on your state machine flow instead of timestamp checking,
+    //  * you can map the ConditionExpression to check against your allowed statuses:
+    //  * e.g., ConditionExpression: "#stateAttr = :queuedState OR #stateAttr = :processingState"
+    //  */
+    // await docClient.send(new UpdateCommand({
+    //   TableName: TABLE_NAME,
+    //   Key: { PK: pk, SK: sk },
+    //   UpdateExpression: "SET onCancellationTimestamp = :ts",
+    //   ConditionExpression: "attribute_not_exists(onPaidTimestamp)",
+    //   ExpressionAttributeValues: {
+    //     ":ts": timestamp,
+    //   }
+    // }));
+
+    await docClient.send(new DeleteCommand({  // TODO: This is temporal  code and should be alternated with the commented code that is just above
       TableName: TABLE_NAME,
       Key: { PK: pk, SK: sk },
-      UpdateExpression: "SET onCancellationTimestamp = :ts",
-      ConditionExpression: "attribute_not_exists(onPaidTimestamp)",
-      ExpressionAttributeValues: {
-        ":ts": timestamp,
-      }
     }));
 
     return c.json({
       message: "Request cancelled successfully",
-      onCancellationTimestamp: timestamp
+      // onCancellationTimestamp: timestamp
     }, 200);
 
   } catch (error: any) {
@@ -194,7 +204,7 @@ requestsRouter.post("/:requestId/cancel", async (c) => {
 });
 
 /**
- * 🛰️ ROUTE: Fetch all active queue requests for a specific restaurant
+ * 🛰️ ROUTE: Fetch all active requests for a specific restaurant
  * PATH: GET /requests/restaurant/:restaurantId/requests
  */
 requestsRouter.get("/:restaurantId", async (c) => {
@@ -214,44 +224,121 @@ requestsRouter.get("/:restaurantId", async (c) => {
         ":skPrefix": "REQ#"
       }
     };
-
     const dbResult = await docClient.send(new QueryCommand(queryParams));
+    
     const rawItems = dbResult.Items || [];
+
+    console.log(`🔍 Raw data to respond the GET request \n${JSON.stringify(rawItems)} \nFor Restaurant: ${rid}`);
 
     // 🧹 2. Filter for active requests and transform them to match "TableRequestPayload"
     const mappedPayloads = rawItems
-      // .filter((item) => item.state === "QUEUED") // Only pull records awaiting waiter actions // TODO: change it later
       .map((item) => {
         const requestId = item.SK.replace("REQ#", ""); // Strip the prefix back out to get the clean ID
-        const createdAtISO = item.onQueuedTimestamp || new Date().toISOString();
-
-        // 🕒 Compute the difference in minutes between creation time and now
-        const createdTimeMs = new Date(createdAtISO).getTime();
-        const nowMs = new Date().getTime();
-        const diffMinutes = Math.max(0, Math.floor((nowMs - createdTimeMs) / 60000));
 
         // Return the exact structure matching your client-side type definitions
-        return {  // TODO: It shouldn't hardcode items here. After repair the TODO(#1), assign the "item"'s attributes of "rawItems" here directly
+        return {
           requestId: requestId,
-          title: "Mesa 4", // Hardcoded target placeholder for now
-          type: "QUEUED", // Hardcoded example enum value matching TableRequestType
-          createdAt: createdAtISO,
-          referenceTimeMinutes: diffMinutes, // Dynamic relative offset calculation
-          info: [
-            { label: "Cliente ID", value: String(item.userId).substring(0, 8) },
-            { label: "Estado", value: `El cliente está en espera en la mesa.` }
-          ],
-          statusText: "En Espera"
+
+          userId: item.userId,
+          userName: item.userName,
+          groupSize: item.groupSize,
+          onQueuedTimestamp: item.onQueuedTimestamp,
+          state: item.state,
+          specifics: item.specifics,
+          arrivlaTime: item.arrivlaTime // TODO: Correct the name
         };
       });
 
-    console.log(`🔍 Initialized UI state feed: Found ${mappedPayloads.length} active table requests for Restaurant: ${rid}`);
+    console.log(`1️⃣📦  Initialized UI state feed: Found \n${JSON.stringify(mappedPayloads)} \nFor Restaurant: ${rid}`);
 
     // 🎉 3. Output the compiled collection straight to your frontend
     return c.json(mappedPayloads, 200);
 
   } catch (error: any) {
     console.error(`🚨 FETCH ACTIVE REQS ERROR: ${error.message}`);
+    return c.json({ error: error.message || "Internal Server Error" }, 500);
+  }
+});
+
+requestsRouter.post("/:restaurantId/update", async (c) => {
+  try {
+    const restaurantId = c.req.param("restaurantId");
+    const body = await c.req.json().catch(() => ({}));
+    const requestId = body.requestId;
+    const newState = body.newState;
+    const userId = body.userId;
+
+    console.log(`1️⃣📦  Data arrived from restaurant ${restaurantId} \n${JSON.stringify(body)}`);
+
+    if (!restaurantId || !requestId || !newState) {
+      return c.json({ error: "Missing restaurantId, requestId, or newState" }, 400);
+    }
+
+    const pk = `REST#${restaurantId}`;
+    const sk = `REQ#${requestId}`;
+
+    const normalizedState = String(newState);
+
+    await docClient.send(new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: pk, SK: sk },
+      UpdateExpression: "SET #state = :state",
+      ExpressionAttributeNames: {
+        "#state": "state",
+      },
+      ExpressionAttributeValues: {
+        ":state": normalizedState,
+      },
+    }));
+
+    const apiKey = ablyKeyWS;
+    let realtimeNotified = false;
+
+    if (apiKey) {
+      const [username, password] = apiKey.split(":");
+      const credentials = btoa(`${username}:${password}`);
+      const channelName = `request:${userId}`;  // In mobile -> "request:$userId"
+      console.log(`1️⃣📺  Channel to subscrive ${channelName}`);
+      const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
+
+      try {
+        const ablyResponse = await fetch(ablyEndpoint, {
+          method: "POST",
+          headers: {
+            'Authorization': `Basic ${credentials}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: "request-status-updated",
+            data: { // TODO: Move this to an object like above
+              restaurantId,
+              newStatus: normalizedState,
+            },
+          }),
+        });
+
+        realtimeNotified = ablyResponse.ok;
+        if (!ablyResponse.ok) {
+          console.warn(`⚠️ Failed to broadcast request status update to Ably, status=${ablyResponse.status}`);
+        }
+      } catch (error: any) {
+        console.warn(`⚠️ Failed to broadcast request status update to Ably: ${error.message}`);
+      }
+    } else {
+      console.warn("⚠️ ABLY_API_KEY is not defined; skipping realtime broadcast.");
+    }
+
+    console.log(`🔎  The post of the request update finished`);
+
+    return c.json({
+      message: "Request state updated successfully",
+      restaurantId,
+      requestId,
+      newState: normalizedState,
+      realtimeNotified,
+    }, 200);
+  } catch (error: any) {
+    console.error(`🚨 UPDATE REQ ERROR: ${error.message}`);
     return c.json({ error: error.message || "Internal Server Error" }, 500);
   }
 });
