@@ -41,6 +41,8 @@ requestsRouter.post("/create", async (c) => {
     //     baby: '2 babies'
     //   }
 
+    // TODO: Verify here that the arrival time is less than 20 minutes (or a small time that the restaurant set)
+
     // Base info
     const baseRequestInfo = {
       userId: userId,
@@ -260,13 +262,13 @@ requestsRouter.get("/:restaurantId", async (c) => {
   }
 });
 
-requestsRouter.post("/:restaurantId/update", async (c) => {
+requestsRouter.post("/:restaurantId/update", async (c) => { /// (#1) Analize if it should be "requestId" instead of the "restaurantId"
   try {
     const restaurantId = c.req.param("restaurantId");
     const body = await c.req.json().catch(() => ({}));
     const requestId = body.requestId;
     const newState = body.newState;
-    const userId = body.userId;
+    const userId = body.userId; /// (#1) if yes, consider if the secure way to get the "userId" and "restaurantId" is via dynamoDB's Query and not from the client 
 
     console.log(`1️⃣📦  Data arrived from restaurant ${restaurantId} \n${JSON.stringify(body)}`);
 
@@ -277,9 +279,11 @@ requestsRouter.post("/:restaurantId/update", async (c) => {
     const pk = `REST#${restaurantId}`;
     const sk = `REQ#${requestId}`;
 
-    const normalizedState = String(newState);
+    const normalizedState = String(newState); /// Necessary?
 
-    await docClient.send(new UpdateCommand({
+    // TODO: Before update, check that the status transition is valid
+
+    await docClient.send(new UpdateCommand({  // TODO: Include the updating of the acceptance's timestamp too
       TableName: TABLE_NAME,
       Key: { PK: pk, SK: sk },
       UpdateExpression: "SET #state = :state",
@@ -291,15 +295,25 @@ requestsRouter.post("/:restaurantId/update", async (c) => {
       },
     }));
 
+    // TODO:
+    // 1. Get the active requests of the user and separate them from the current request.
+    // 2. Cancel those request in DynamoBD (In MVP, it's deleting them, but then is updating the attribute "onCancelTimestamp") 
+    // 3. Use the batch publish of Ably to cancel the table request of the other restaurants (In claude "AWS expert" is the code ) 
+
+    const channelName: Record<string, string> = {
+      ACCEPTED: `request:${userId}`,
+      READY: `restaurant:${restaurantId}:ops`
+    }
+
     const apiKey = ablyKeyWS;
     let realtimeNotified = false;
 
     if (apiKey) {
       const [username, password] = apiKey.split(":");
       const credentials = btoa(`${username}:${password}`);
-      const channelName = `request:${userId}`;  // In mobile -> "request:$userId"
-      console.log(`1️⃣📺  Channel to subscrive ${channelName}`);
-      const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
+      //X const channelName = `request:${userId}`;  // In mobile -> "request:$userId"
+      console.log(`1️⃣📺  Channel to subscrive ${channelName[normalizedState]}`);
+      const ablyEndpoint = `https://rest.ably.io/channels/${channelName[normalizedState]}/messages`;
 
       try {
         const ablyResponse = await fetch(ablyEndpoint, {
@@ -309,9 +323,10 @@ requestsRouter.post("/:restaurantId/update", async (c) => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            name: "request-status-updated",
+            name: "request-status-updated", /// Consider change Message's name by a code for security 
             data: { // TODO: Move this to an object like above
-              restaurantId,
+              //X restaurantId,
+              requestId,
               newStatus: normalizedState,
             },
           }),

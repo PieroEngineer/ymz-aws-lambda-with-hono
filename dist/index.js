@@ -2712,6 +2712,7 @@ ${JSON.stringify(body)}`);
     const sk = `REQ#${requestId}`;
     const normalizedState = String(newState);
     await docClient.send(new UpdateCommand({
+      // TODO: Include the updating of the acceptance's timestamp too
       TableName: TABLE_NAME,
       Key: { PK: pk, SK: sk },
       UpdateExpression: "SET #state = :state",
@@ -2722,14 +2723,17 @@ ${JSON.stringify(body)}`);
         ":state": normalizedState
       }
     }));
+    const channelName = {
+      ACCEPTED: `request:${userId}`,
+      READY: `restaurant:${restaurantId}:ops`
+    };
     const apiKey = ablyKeyWS;
     let realtimeNotified = false;
     if (apiKey) {
       const [username, password] = apiKey.split(":");
       const credentials = btoa(`${username}:${password}`);
-      const channelName = `request:${userId}`;
-      console.log(`1\uFE0F\u20E3\u{1F4FA}  Channel to subscrive ${channelName}`);
-      const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
+      console.log(`1\uFE0F\u20E3\u{1F4FA}  Channel to subscrive ${channelName[normalizedState]}`);
+      const ablyEndpoint = `https://rest.ably.io/channels/${channelName[normalizedState]}/messages`;
       try {
         const ablyResponse = await fetch(ablyEndpoint, {
           method: "POST",
@@ -2739,9 +2743,11 @@ ${JSON.stringify(body)}`);
           },
           body: JSON.stringify({
             name: "request-status-updated",
+            /// Consider change Message's name by a code for security 
             data: {
               // TODO: Move this to an object like above
-              restaurantId,
+              //X restaurantId,
+              requestId,
               newStatus: normalizedState
             }
           })
