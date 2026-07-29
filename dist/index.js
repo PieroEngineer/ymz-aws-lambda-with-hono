@@ -2776,16 +2776,170 @@ ${JSON.stringify(body)}`);
   }
 });
 
-// src/routes/restaurants.ts
-import { QueryCommand as QueryCommand2, BatchGetCommand, DynamoDBDocumentClient as DynamoDBDocumentClient2 } from "@aws-sdk/lib-dynamodb";
-import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-var s3Client = getS3Client();
+// src/routes/payments.ts
+import { QueryCommand as QueryCommand2, PutCommand as PutCommand2, DynamoDBDocumentClient as DynamoDBDocumentClient2, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
+var paymentsRouter = new Hono2();
 var docClient2 = DynamoDBDocumentClient2.from(getDynamoDBClient(), {
   marshallOptions: { removeUndefinedValues: true }
 });
 var TABLE_NAME2 = "YummiziTable";
+paymentsRouter.post("/confirm", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const restaurantId = body.restaurantId;
+  const userId = body.userId;
+  const requestId = body.requestId;
+  const userName = body.userName;
+  const arrivalTimeInMinutes = body.arrivalTimeInMinutes;
+  const groupSize = body.groupSize;
+  const orderSelections = body.orderSelections;
+  if (!restaurantId || !userId || !requestId) {
+    return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
+  }
+  const keys = orderSelections.map((selections) => ({
+    PK: `REST#${restaurantId}`,
+    SK: `RESOURCE#DISH#${selections.dishId}`
+  }));
+  const command = new BatchGetCommand({
+    /// Analyze if a transaction is more proper for this situation
+    RequestItems: {
+      [TABLE_NAME2]: {
+        Keys: keys,
+        ConsistentRead: false,
+        // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB)
+        ProjectionExpression: "priceCents"
+        // Optional: Save bandwidth
+      }
+    }
+  });
+  const response = await docClient2.send(command);
+  const dishItems = response.Responses?.[TABLE_NAME2] || [];
+  const totalCostInCents = dishItems.reduce((sum, item) => sum + (item.priceCents || 0), 0);
+  const basePaymentPreselection = {
+    lastUpdateTimestamp: Date.now(),
+    userName,
+    userId,
+    orderSelections,
+    arrivalTimeInMinutes,
+    groupSize,
+    totalCostInCents,
+    onPaidTimeStamp: Date.now()
+    //paymentMethod,
+  };
+  const paymentPreselectionItem = {
+    PK: `REST#${restaurantId}`,
+    SK: `ORDER#${requestId}`,
+    /// Perphaps it should be a new ID, not the request ID
+    ...basePaymentPreselection
+  };
+  console.log("\u{1F4BD}  Order to save in DynamoDB", JSON.stringify(paymentPreselectionItem, null, 2), "\nfor restaurant ", restaurantId);
+  try {
+    await docClient2.send(new PutCommand2({
+      TableName: TABLE_NAME2,
+      Item: paymentPreselectionItem
+    }));
+    const clientPayload = {
+      requestId,
+      ...basePaymentPreselection
+    };
+    const apiKey = ablyKeyWS;
+    if (!apiKey) {
+      throw new Error("ABLY_API_KEY is not defined");
+    }
+    const [username, password] = apiKey.split(":");
+    const credentials = btoa(`${username}:${password}`);
+    const channelName = `restaurant:${restaurantId}:ops`;
+    const requestName = "new-order-preselected";
+    const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
+    let ablyDispatchSuccess = false;
+    let attempts = 0;
+    const maxAttempts = 3;
+    while (!ablyDispatchSuccess && attempts < maxAttempts) {
+      try {
+        attempts++;
+        const ablyResponse = await fetch(ablyEndpoint, {
+          method: "POST",
+          headers: {
+            "Authorization": `Basic ${credentials}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            name: requestName,
+            // The targeted subscriber frequency path matching mock constraints
+            data: clientPayload
+            // The exact TableRequestPayload DTO shape your staff app consumes
+          })
+        });
+        if (ablyResponse.ok) {
+          ablyDispatchSuccess = true;
+          console.log(`\u{1F4E1} [Attempt ${attempts}] Successfully order preselection event to Ably channel: ${channelName}`);
+          console.log(`\u{1F4E6}  Order to send: ${JSON.stringify({ name: requestName, data: clientPayload }, null, 2)}`);
+        } else {
+          console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Mock Ably returned a status error code: ${ablyResponse.status}`);
+        }
+      } catch (netErr) {
+        console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Network failure transmitting data payload to mock Ably server: ${netErr.message}`);
+      }
+    }
+    if (!ablyDispatchSuccess) {
+      console.error(`\u{1F6A8} CRITICAL: Failed to stream real-time broadcast alert data past ${maxAttempts} attempts. Database state remains fully valid.`);
+    }
+    return c.json({
+      message: "Order saved successfully and broadcast state synchronized",
+      requestId,
+      realtimeNotified: ablyDispatchSuccess
+    }, 201);
+  } catch (error) {
+    console.error(`\u{1F6A8} CREATE REQ ERROR: ${error.message}`);
+    return c.json({ error: error.message || "Internal Server Error" }, 500);
+  }
+});
+paymentsRouter.get("/:restaurantId", async (c) => {
+  try {
+    const rid = c.req.param("restaurantId");
+    if (!rid) {
+      return c.json({ error: "Missing restaurantId parameter" }, 400);
+    }
+    const queryParams = {
+      TableName: TABLE_NAME2,
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+      ExpressionAttributeValues: {
+        ":pk": `REST#${rid}`,
+        ":skPrefix": "ORDER#"
+      }
+    };
+    const dbResult = await docClient2.send(new QueryCommand2(queryParams));
+    const rawItems = dbResult.Items || [];
+    const mappedPayloads = rawItems.map((item) => {
+      const requestId = item.SK.replace("ORDER#", "");
+      return {
+        requestId,
+        userName: item.userName,
+        lastUpdateTimestamp: item.lastUpdateTimestamp,
+        userId: item.userId,
+        orderSelections: item.orderSelections,
+        arrivalTimeInMinutes: item.arrivalTimeInMinutes,
+        groupSize: item.groupSize,
+        totalCostInCents: item.totalCostInCents,
+        onPaidTimeStamp: item.onPaidTimeStamp
+      };
+    });
+    return c.json(mappedPayloads, 200);
+  } catch (error) {
+    console.error(`\u{1F6A8} FETCH PAYMENT PRESELECTIONS ERROR: ${error.message}`);
+    return c.json({ error: error.message || "Internal Server Error" }, 500);
+  }
+});
+
+// src/routes/restaurants.ts
+import { QueryCommand as QueryCommand3, BatchGetCommand as BatchGetCommand2, DynamoDBDocumentClient as DynamoDBDocumentClient3 } from "@aws-sdk/lib-dynamodb";
+import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+var s3Client = getS3Client();
+var docClient3 = DynamoDBDocumentClient3.from(getDynamoDBClient(), {
+  marshallOptions: { removeUndefinedValues: true }
+});
+var TABLE_NAME3 = "YummiziTable";
 var BUCKET_NAME = "restaurant-assets";
 var restaurantsRouter = new Hono2();
 restaurantsRouter.get("/feed", async (c) => {
@@ -2795,8 +2949,8 @@ restaurantsRouter.get("/feed", async (c) => {
       return c.json({ error: "Missing userId" }, 400);
     }
     const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`;
-    const feedLinksResponse = await docClient2.send(new QueryCommand2({
-      TableName: TABLE_NAME2,
+    const feedLinksResponse = await docClient3.send(new QueryCommand3({
+      TableName: TABLE_NAME3,
       KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
       ExpressionAttributeValues: {
         ":pk": `USER#${userId}`,
@@ -2816,14 +2970,14 @@ restaurantsRouter.get("/feed", async (c) => {
       restaurantKeys.push({ PK: `REST#${rid}`, SK: "METADATA" });
       sectionMap[rid] = sectionName;
     }
-    const batchResponse = await docClient2.send(new BatchGetCommand({
+    const batchResponse = await docClient3.send(new BatchGetCommand2({
       RequestItems: {
-        [TABLE_NAME2]: {
+        [TABLE_NAME3]: {
           Keys: restaurantKeys
         }
       }
     }));
-    const rawRestaurants = batchResponse.Responses?.[TABLE_NAME2] || [];
+    const rawRestaurants = batchResponse.Responses?.[TABLE_NAME3] || [];
     const formattedFeed = rawRestaurants.map((res) => {
       const rid = res.PK.replace("REST#", "");
       const originalDishes = res.dishesToShow || [];
@@ -2853,8 +3007,8 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
       return c.json({ error: "restaurantId is required" }, 400);
     }
     const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`;
-    const response = await docClient2.send(new QueryCommand2({
-      TableName: TABLE_NAME2,
+    const response = await docClient3.send(new QueryCommand3({
+      TableName: TABLE_NAME3,
       KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
       ExpressionAttributeValues: {
         ":pk": `REST#${rid}`,
@@ -2928,7 +3082,7 @@ ${JSON.stringify(menuPages, null, 2)}`);
       if (action === "delete") {
         transactionItems.push({
           Delete: {
-            TableName: TABLE_NAME2,
+            TableName: TABLE_NAME3,
             Key: { PK: `REST#${rid}`, SK: sk }
           }
         });
@@ -2957,7 +3111,7 @@ ${JSON.stringify(menuPages, null, 2)}`);
         if (action === "save") {
           transactionItems.push({
             Put: {
-              TableName: TABLE_NAME2,
+              TableName: TABLE_NAME3,
               Item: {
                 PK: `REST#${rid}`,
                 SK: sk,
@@ -2991,7 +3145,7 @@ ${JSON.stringify(menuPages, null, 2)}`);
           if (expressions.length > 0) {
             transactionItems.push({
               Update: {
-                TableName: TABLE_NAME2,
+                TableName: TABLE_NAME3,
                 Key: { PK: `REST#${rid}`, SK: sk },
                 UpdateExpression: `SET ${expressions.join(", ")}`,
                 ExpressionAttributeValues: expressionAttributeValues
@@ -3008,14 +3162,14 @@ ${JSON.stringify(menuPages, null, 2)}`);
       if (action === "delete") {
         transactionItems.push({
           Delete: {
-            TableName: TABLE_NAME2,
+            TableName: TABLE_NAME3,
             Key: { PK: `REST#${rid}`, SK: sk }
           }
         });
       } else if (action === "save") {
         transactionItems.push({
           Put: {
-            TableName: TABLE_NAME2,
+            TableName: TABLE_NAME3,
             Item: {
               // Shape of what is going to be sent
               PK: `REST#${rid}`,
@@ -3068,7 +3222,7 @@ ${JSON.stringify(menuPages, null, 2)}`);
         if (expressions.length > 0) {
           transactionItems.push({
             Update: {
-              TableName: TABLE_NAME2,
+              TableName: TABLE_NAME3,
               Key: { PK: `REST#${rid}`, SK: sk },
               UpdateExpression: `SET ${expressions.join(", ")}`,
               ExpressionAttributeValues: expressionAttributeValues
@@ -3085,7 +3239,7 @@ ${JSON.stringify(transactionItems, null, 2)}`);
     if (transactionItems.length > 100) {
       return c.json({ error: "Transaction block exceeds AWS limit of 100 items." }, 400);
     }
-    await docClient2.send(new TransactWriteCommand({
+    await docClient3.send(new TransactWriteCommand({
       TransactItems: transactionItems
     }));
     const responsePayload = {
@@ -3101,11 +3255,11 @@ ${JSON.stringify(transactionItems, null, 2)}`);
 });
 
 // src/routes/users.ts
-import { PutCommand as PutCommand2, DeleteCommand as DeleteCommand2, DynamoDBDocumentClient as DynamoDBDocumentClient3 } from "@aws-sdk/lib-dynamodb";
-var docClient3 = DynamoDBDocumentClient3.from(getDynamoDBClient(), {
+import { PutCommand as PutCommand3, DeleteCommand as DeleteCommand2, DynamoDBDocumentClient as DynamoDBDocumentClient4 } from "@aws-sdk/lib-dynamodb";
+var docClient4 = DynamoDBDocumentClient4.from(getDynamoDBClient(), {
   marshallOptions: { removeUndefinedValues: true }
 });
-var TABLE_NAME3 = "YummiziTable";
+var TABLE_NAME4 = "YummiziTable";
 var usersRouter = new Hono2();
 usersRouter.put("/:userId/preferences/:prefId", async (c) => {
   try {
@@ -3129,8 +3283,8 @@ usersRouter.put("/:userId/preferences/:prefId", async (c) => {
       createdAt: body.createdAt ? Number(body.createdAt) : void 0
       // Maps Kotlin Long timestamp cleanly
     };
-    await docClient3.send(new PutCommand2({
-      TableName: TABLE_NAME3,
+    await docClient4.send(new PutCommand3({
+      TableName: TABLE_NAME4,
       Item: preferenceItem
     }));
     console.log(`\u2705\u{1F64B} The preference ${pref_id} for user ${user_id} was successfully added`);
@@ -3149,8 +3303,8 @@ usersRouter.delete("/:userId/preferences/:prefId", async (c) => {
     }
     const pk = `USER#${user_id}`;
     const sk = `PREF#${pref_id}`;
-    await docClient3.send(new DeleteCommand2({
-      TableName: TABLE_NAME3,
+    await docClient4.send(new DeleteCommand2({
+      TableName: TABLE_NAME4,
       Key: { PK: pk, SK: sk }
     }));
     console.log(`\u2705\u{1F5D1}\uFE0F The preference ${pref_id} of user ${user_id} was successfully deleted`);
@@ -3175,6 +3329,7 @@ app.use(
     credentials: true
   })
 );
+app.route("/payments", paymentsRouter);
 app.route("/requests", requestsRouter);
 app.route("/restaurants", restaurantsRouter);
 app.route("/users", usersRouter);

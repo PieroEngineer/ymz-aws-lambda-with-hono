@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors"; // 🔌 1. Import the native CORS middleware
 import { handle } from "hono/aws-lambda"; // 🔌 Official Hono adapter for AWS serverless payloads
 import { requestsRouter } from "./routes/requests.js"; // 📦 Import your requests submodule router
+import { paymentsRouter } from "./routes/payments.js";
 import { restaurantsRouter } from "./routes/restaurants.js"; // 🔌 Import the new file
 import { usersRouter } from "./routes/users.js";
 
@@ -27,6 +28,7 @@ app.use(
  * Funnels all traffic coming to '/requests/*' straight into our modular requests router.
  * This includes /requests/create and /requests/:requestId/cancel
  */
+app.route("/payments", paymentsRouter);
 app.route("/requests", requestsRouter);
 app.route("/restaurants", restaurantsRouter); // 🏪 Funnels all /restaurants/* traffic here
 app.route("/users", usersRouter); // 🙋 Funnels all /users/* traffic straight into the new module
