@@ -3,6 +3,7 @@ import { getDynamoDBClient } from "../aws/clientFactory.js";
 import { QueryCommand, PutCommand, DynamoDBDocumentClient, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
 import { ablyKeyWS } from "../k.js";
 import { OrderItemPayload } from "../types/orderTypes.js";
+import { calculateTotalCost } from "../services/paymentService.js"
 
 export const paymentsRouter = new Hono();
 
@@ -30,10 +31,12 @@ paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every 
       return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
     }
 
+    // TODO: Only the users in ACCEPTED can do this 
+
     // 1. Map your SKs into the required DynamoDB key structure
-    const keys = orderSelections.map((selections) => ({
+    const keys = orderSelections.map((selection) => ({
       PK: `REST#${restaurantId}`,
-      SK: `RESOURCE#DISH#${selections.dishId}`,
+      SK: `RESOURCE#DISH#${selection.dishId}`,
     }));
 
     const command = new BatchGetCommand({ /// Analyze if a transaction is more proper for this situation
@@ -41,7 +44,7 @@ paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every 
         [TABLE_NAME]: {
           Keys: keys,
           ConsistentRead: false, // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB)
-          ProjectionExpression: "priceCents", // Optional: Save bandwidth
+          ProjectionExpression: "priceCents, SK", // Optional: Save bandwidth
         },
       },
     });
@@ -50,7 +53,13 @@ paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every 
   // Extract results safely
   const dishItems = response.Responses?.[TABLE_NAME] || [];
 
-  const totalCostInCents = dishItems.reduce((sum, item) => sum + (item.priceCents || 0), 0);
+  // console.log('💲🔎  Listing the prices in cents of the selected dishes');
+  // dishItems.forEach(dishItem => {
+  //     console.log(dishItem.dishName, ':', dishItem.priceCents)
+  // });
+
+  const totalCostInCents = calculateTotalCost(orderSelections, dishItems);
+  // console.log('💲🔎  Total price in cents is ', totalCostInCents);
 
     // TODO: Handle the situation when a dish wasn't found. "BatchGet" doesn't notify that, so I leave this code as hint to handle it; continue the action to notify to the user and/or restaurant
     // Inside your Hono handler...
@@ -90,80 +99,81 @@ paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every 
 
     try {
         // Execute atomic database insertion (System of Record First!)
-    await docClient.send(new PutCommand({
-        TableName: TABLE_NAME,
-        Item: paymentPreselectionItem,
-    }));
+      await docClient.send(new PutCommand({
+          TableName: TABLE_NAME,
+          Item: paymentPreselectionItem,
+      }));
 
-    const clientPayload = {
-      requestId: requestId,
+      const clientPayload = {
+        requestId: requestId,
 
-      ...basePaymentPreselection
-    };
+        ...basePaymentPreselection
+      };
 
-    const apiKey = ablyKeyWS;
+      const apiKey = ablyKeyWS;
 
-    if (!apiKey) {
-      throw new Error("ABLY_API_KEY is not defined");
-    }
-
-    const [username, password] = apiKey.split(':');
-    const credentials = btoa(`${username}:${password}`);
-
-    const channelName = `restaurant:${restaurantId}:ops`;
-    const requestName = 'new-order-preselected'
-    
-    const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`
-
-    // We can extract this to an inline execution workflow
-    let ablyDispatchSuccess = false;
-    let attempts = 0;
-    const maxAttempts = 3;
-
-    while (!ablyDispatchSuccess && attempts < maxAttempts) {  /// It would look better if this part is saved within a helper
-      try {
-        attempts++;
-        const ablyResponse = await fetch(ablyEndpoint, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Basic ${credentials}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            name: requestName,   // The targeted subscriber frequency path matching mock constraints
-            data: clientPayload   // The exact TableRequestPayload DTO shape your staff app consumes
-          })
-        });
-
-        if (ablyResponse.ok) {
-          ablyDispatchSuccess = true;
-          console.log(`📡 [Attempt ${attempts}] Successfully order preselection event to Ably channel: ${channelName}`);
-          console.log(`📦  Order to send: ${JSON.stringify({name: requestName, data: clientPayload}, null, 2)}`);
-          
-        } else {
-          console.warn(`⚠️ [Attempt ${attempts}] Mock Ably returned a status error code: ${ablyResponse.status}`);
-        }
-      } catch (netErr: any) {
-        console.warn(`⚠️ [Attempt ${attempts}] Network failure transmitting data payload to mock Ably server: ${netErr.message}`);
+      if (!apiKey) {
+        throw new Error("ABLY_API_KEY is not defined");
       }
-    }
 
-    // Logging total failure fallback trace benchmarks if the mock server is down entirely
-    if (!ablyDispatchSuccess) {
-      console.error(`🚨 CRITICAL: Failed to stream real-time broadcast alert data past ${maxAttempts} attempts. Database state remains fully valid.`);
-    }
+      const [username, password] = apiKey.split(':');
+      const credentials = btoa(`${username}:${password}`);
 
-     // 🎉 Success response utilizing Hono native JSON encoder
-    return c.json({
-      message: "Order saved successfully and broadcast state synchronized",
-      requestId: requestId,
-      realtimeNotified: ablyDispatchSuccess
-    }, 201);
-}
-catch (error: any) {
-    console.error(`🚨 CREATE REQ ERROR: ${error.message}`);
-    return c.json({ error: error.message || "Internal Server Error" }, 500);
-}
+      const channelName = `restaurant:${restaurantId}:ops`;
+      const requestName = 'new-order-preselected'
+      
+      const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`
+
+      // We can extract this to an inline execution workflow
+      let ablyDispatchSuccess = false;
+      let attempts = 0;
+      const maxAttempts = 3;
+
+      while (!ablyDispatchSuccess && attempts < maxAttempts) {  /// It would look better if this part is saved within a helper
+        try {
+          attempts++;
+          const ablyResponse = await fetch(ablyEndpoint, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Basic ${credentials}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              name: requestName,   // The targeted subscriber frequency path matching mock constraints
+              data: clientPayload   // The exact TableRequestPayload DTO shape your staff app consumes
+            })
+          });
+
+          if (ablyResponse.ok) {
+            ablyDispatchSuccess = true;
+            console.log(`📡 [Attempt ${attempts}] Successfully order preselection event to Ably channel: ${channelName}`);
+            console.log(`📦  Order to send: ${JSON.stringify({name: requestName, data: clientPayload}, null, 2)}`);
+            
+          } else {
+            console.warn(`⚠️ [Attempt ${attempts}] Mock Ably returned a status error code: ${ablyResponse.status}`);
+          }
+        } catch (netErr: any) {
+          console.warn(`⚠️ [Attempt ${attempts}] Network failure transmitting data payload to mock Ably server: ${netErr.message}`);
+        }
+      }
+
+      // Logging total failure fallback trace benchmarks if the mock server is down entirely
+      if (!ablyDispatchSuccess) {
+        console.error(`🚨 CRITICAL: Failed to stream real-time broadcast alert data past ${maxAttempts} attempts. Database state remains fully valid.`);
+      }
+
+      // 🎉 Success response utilizing Hono native JSON encoder
+      return c.json({
+        message: "Order saved successfully and broadcast state synchronized",
+        requestId: requestId,
+        totalPriceInCents: totalCostInCents,
+        // realtimeNotified: ablyDispatchSuccess
+      }, 201);
+  }
+  catch (error: any) {
+      console.error(`🚨 CREATE REQ ERROR: ${error.message}`);
+      return c.json({ error: error.message || "Internal Server Error" }, 500);
+  }
 
 });
 
@@ -209,3 +219,4 @@ paymentsRouter.get("/:restaurantId", async (c) => {
     return c.json({ error: error.message || "Internal Server Error" }, 500);
   }
 });
+

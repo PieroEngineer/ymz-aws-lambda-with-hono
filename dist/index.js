@@ -2778,6 +2778,31 @@ ${JSON.stringify(body)}`);
 
 // src/routes/payments.ts
 import { QueryCommand as QueryCommand2, PutCommand as PutCommand2, DynamoDBDocumentClient as DynamoDBDocumentClient2, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
+
+// src/services/paymentService.ts
+function calculateTotalCost(selectedDishes, dynamoDbResponsesWithPrices) {
+  const numDbItems = dynamoDbResponsesWithPrices.length;
+  const numInputItems = selectedDishes.length;
+  const priceMap = /* @__PURE__ */ new Map();
+  for (let i = 0; i < numDbItems; i++) {
+    const item = dynamoDbResponsesWithPrices[i];
+    const dishId = item.SK.replace("RESOURCE#DISH#", "");
+    if (item && dishId !== void 0 && item.priceCents !== void 0) {
+      priceMap.set(dishId, item.priceCents);
+    }
+  }
+  let totalCents = 0;
+  for (let j = 0; j < numInputItems; j++) {
+    const input = selectedDishes[j];
+    const price = priceMap.get(input.dishId);
+    if (price !== void 0) {
+      totalCents += input.quantity * price;
+    }
+  }
+  return totalCents;
+}
+
+// src/routes/payments.ts
 var paymentsRouter = new Hono2();
 var docClient2 = DynamoDBDocumentClient2.from(getDynamoDBClient(), {
   marshallOptions: { removeUndefinedValues: true }
@@ -2795,9 +2820,9 @@ paymentsRouter.post("/confirm", async (c) => {
   if (!restaurantId || !userId || !requestId) {
     return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
   }
-  const keys = orderSelections.map((selections) => ({
+  const keys = orderSelections.map((selection) => ({
     PK: `REST#${restaurantId}`,
-    SK: `RESOURCE#DISH#${selections.dishId}`
+    SK: `RESOURCE#DISH#${selection.dishId}`
   }));
   const command = new BatchGetCommand({
     /// Analyze if a transaction is more proper for this situation
@@ -2806,14 +2831,14 @@ paymentsRouter.post("/confirm", async (c) => {
         Keys: keys,
         ConsistentRead: false,
         // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB)
-        ProjectionExpression: "priceCents"
+        ProjectionExpression: "priceCents, SK"
         // Optional: Save bandwidth
       }
     }
   });
   const response = await docClient2.send(command);
   const dishItems = response.Responses?.[TABLE_NAME2] || [];
-  const totalCostInCents = dishItems.reduce((sum, item) => sum + (item.priceCents || 0), 0);
+  const totalCostInCents = calculateTotalCost(orderSelections, dishItems);
   const basePaymentPreselection = {
     lastUpdateTimestamp: Date.now(),
     userName,
@@ -2886,7 +2911,8 @@ paymentsRouter.post("/confirm", async (c) => {
     return c.json({
       message: "Order saved successfully and broadcast state synchronized",
       requestId,
-      realtimeNotified: ablyDispatchSuccess
+      totalPriceInCents: totalCostInCents
+      // realtimeNotified: ablyDispatchSuccess
     }, 201);
   } catch (error) {
     console.error(`\u{1F6A8} CREATE REQ ERROR: ${error.message}`);
