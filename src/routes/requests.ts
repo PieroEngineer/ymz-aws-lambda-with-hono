@@ -62,7 +62,7 @@ requestsRouter.post("/create", async (c) => {
       ...baseRequestInfo
     };
 
-    console.log('💽  Item to save in DynamoDB', JSON.stringify(newRequestItem , null, 2), '\nfor restaurant ', restaurantId);
+    console.log('💽  Request Item to save in DynamoDB', JSON.stringify(newRequestItem , null, 2), '\nfor restaurant ', restaurantId);
     
     // Execute atomic database insertion (System of Record First!)
     await docClient.send(new PutCommand({

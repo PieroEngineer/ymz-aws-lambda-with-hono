@@ -2563,7 +2563,7 @@ requestsRouter.post("/create", async (c) => {
       SK: `REQ#${requestId}`,
       ...baseRequestInfo
     };
-    console.log("\u{1F4BD}  Item to save in DynamoDB", JSON.stringify(newRequestItem, null, 2), "\nfor restaurant ", restaurantId);
+    console.log("\u{1F4BD}  Request Item to save in DynamoDB", JSON.stringify(newRequestItem, null, 2), "\nfor restaurant ", restaurantId);
     await docClient.send(new PutCommand({
       TableName: TABLE_NAME,
       Item: newRequestItem
@@ -2957,7 +2957,7 @@ paymentsRouter.get("/:restaurantId", async (c) => {
 });
 
 // src/routes/restaurants.ts
-import { QueryCommand as QueryCommand3, BatchGetCommand as BatchGetCommand2, DynamoDBDocumentClient as DynamoDBDocumentClient3 } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand as QueryCommand3, BatchGetCommand as BatchGetCommand2, GetCommand, DynamoDBDocumentClient as DynamoDBDocumentClient3 } from "@aws-sdk/lib-dynamodb";
 import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -3279,6 +3279,38 @@ ${JSON.stringify(transactionItems, null, 2)}`);
     return c.json({ error: "Internal Server Error" }, 500);
   }
 });
+restaurantsRouter.get("/:restaurantId/payment", async (c) => {
+  try {
+    const rid = c.req.param("restaurantId");
+    if (!rid) {
+      return c.json({ error: "restaurantId is required" }, 400);
+    }
+    const response = await docClient3.send(new GetCommand({
+      TableName: TABLE_NAME3,
+      Key: {
+        PK: `REST#${rid}`,
+        SK: "METADATA"
+      },
+      ConsistentRead: false,
+      ProjectionExpression: "phoneNumberToPay, phoneNumberToContact, paymentQrUrl"
+    }));
+    const metadata = response.Item;
+    if (!metadata) {
+      return c.json({ error: "\u{1F6A9} Restaurant payment metadata not found" }, 404);
+    }
+    const phoneNumberToPay = Number(metadata.phoneNumberToPay);
+    const phoneNumberToContact = Number(metadata.phoneNumberToContact);
+    const paymentQrUrl = typeof metadata.paymentQrUrl === "string" ? metadata.paymentQrUrl : "";
+    return c.json({
+      phoneNumberToPay,
+      phoneNumberToContact,
+      paymentQrUrl
+    }, 200);
+  } catch (error) {
+    console.error(`\u{1F6A8} RESTAURANT PAYMENT ROUTE ERROR: ${error.message}`);
+    return c.json({ error: "Internal Server Error" }, 500);
+  }
+});
 
 // src/routes/users.ts
 import { PutCommand as PutCommand3, DeleteCommand as DeleteCommand2, DynamoDBDocumentClient as DynamoDBDocumentClient4 } from "@aws-sdk/lib-dynamodb";
@@ -3341,6 +3373,44 @@ usersRouter.delete("/:userId/preferences/:prefId", async (c) => {
   }
 });
 
+// src/routes/feedbacks.ts
+import { PutCommand as PutCommand4, DynamoDBDocumentClient as DynamoDBDocumentClient5 } from "@aws-sdk/lib-dynamodb";
+var feedbacksRouter = new Hono2();
+var TABLE_NAME5 = "YummiziTable";
+var docClient5 = DynamoDBDocumentClient5.from(getDynamoDBClient(), {
+  marshallOptions: { removeUndefinedValues: true }
+});
+feedbacksRouter.post("/final", async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const userId = body.userId;
+    const requestId = body.requestId;
+    const conformDegree = body.conformDegree;
+    const description = body.description;
+    if (!userId || !requestId) {
+      return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
+    }
+    const newFinalFeedbackItem = {
+      PK: `FEEDBACK#${requestId}`,
+      SK: `USER#${userId}`,
+      conformDegree,
+      description
+    };
+    console.log("\u{1F4BD} Feedback Item to save in DynamoDB", JSON.stringify(newFinalFeedbackItem, null, 2), "\nfor request ", requestId);
+    await docClient5.send(new PutCommand4({
+      TableName: TABLE_NAME5,
+      Item: newFinalFeedbackItem
+    }));
+    return c.json({
+      message: "Feedback saved successfully"
+      // realtimeNotified: ablyDispatchSuccess
+    }, 201);
+  } catch (error) {
+    console.error(`\u{1F6A8} SAVE FEEDBACK ERROR: ${error.message}`);
+    return c.json({ error: error.message || "Internal Server Error" }, 500);
+  }
+});
+
 // src/index.ts
 var app = new Hono2();
 app.use(
@@ -3359,6 +3429,7 @@ app.route("/payments", paymentsRouter);
 app.route("/requests", requestsRouter);
 app.route("/restaurants", restaurantsRouter);
 app.route("/users", usersRouter);
+app.route("/feedbacks", feedbacksRouter);
 app.get("/", (c) => {
   return c.json({
     status: "healthy",

@@ -45,7 +45,7 @@ const getRandomInt = (min: number, max: number): number =>
 async function seedData() {
   console.log("🚀 Seeding the Single-Table Cloud (TypeScript Edition)...");
 
-  const visualElements = ["logo", "food", "menu"];
+  const visualElements = ["logo", "food", "menu", "qr"];
   const sampleImagesMap: Record<string, string> = {};
 
   // 📂 1. MAP LOCAL MOCKUP IMAGES TO S3 PATHS
@@ -67,6 +67,7 @@ async function seedData() {
   const logoImageKeys_ = Object.keys(sampleImagesMap).filter(k => k.startsWith("logos/"));
   const foodImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("foods/"));
   const menuImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("menus/"));
+  const qrImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("qrs/"));
 
   // 📐 COORD MATRIX
   const dishesCoordinates: [number, number][][] = [
@@ -116,6 +117,7 @@ async function seedData() {
     const rid = restaurantUuids[i];
     const logoImageUrl = `${s3BaseUrl}/${logoImageKeys[i]}`;
     const dishImageUrlsToShow: string[] = [];
+    const qrUrl = `${s3BaseUrl}/${qrImageKeys[0]}`;
 
     const totalMenusForRestaurant = getRandomInt(2, 3);
 
@@ -177,6 +179,8 @@ async function seedData() {
       console.log(`⚠️ No showcase dishes randomly hit for ${rid}.`);
     }
 
+    const randomPhoneNumber = Math.floor(Math.random() * 100_000_000) + 900_000_000;
+
     // 📝 5. METADATA RECORD CREATION
     await docClient.send(new PutCommand({
       TableName: TABLE_NAME,
@@ -191,6 +195,9 @@ async function seedData() {
         openTime: "08:00",
         closeTime: "22:00",
         dishesToShow: dishImageUrlsToShow,
+        phoneNumberToPay: randomPhoneNumber,
+        phoneNumberToContact: randomPhoneNumber,
+        paymentQrUrl: qrUrl,
       }
     }));
 

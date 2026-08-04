@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { QueryCommand, BatchGetCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand, BatchGetCommand, GetCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { getDynamoDBClient, getS3Client } from "../aws/clientFactory.js";
 import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { PutObjectCommand } from "@aws-sdk/client-s3"; // 📦 Native S3 actions
@@ -11,7 +11,7 @@ const s3Client = getS3Client();
 //TODO: Change the URLs by keys, the entire link shouldn't be sent
 
 // 📦 Define your structural types matching client DTO definitions
-export interface PresignedUrlMapping {
+export interface PresignedUrlMapping {  // TODO: Move to interfaces
   pageId: string;
   uploadUrl: string; // Temporary token URL for client PUT request
   publicUrl: string; // The permanent public read URL saved in DB
@@ -459,6 +459,58 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
 
   } catch (error: any) {
     console.error(`🚨 SYNC MENU ROUTE ERROR -> ${error.message}`);
+    return c.json({ error: "Internal Server Error" }, 500);
+  }
+});
+
+restaurantsRouter.get("/:restaurantId/payment", async (c) => {
+  try {
+    const rid = c.req.param("restaurantId");
+
+    if (!rid) {
+      return c.json({ error: "restaurantId is required" }, 400);
+    }
+
+    // if (rid.length > 128 || !/^[A-Za-z0-9_-]+$/.test(rid)) {  /// Here an example of ID shape validation
+    //   return c.json({ error: "Invalid restaurantId" }, 400);
+    // }
+
+    const response = await docClient.send(new GetCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `REST#${rid}`,
+        SK: "METADATA",
+      },
+      ConsistentRead: false,
+      ProjectionExpression: "phoneNumberToPay, phoneNumberToContact, paymentQrUrl",
+    }));
+
+    const metadata = response.Item;
+
+    if (!metadata) {
+      return c.json({ error: "🚩 Restaurant payment metadata not found" }, 404);
+    }
+
+    const phoneNumberToPay = Number(metadata.phoneNumberToPay);
+    const phoneNumberToContact = Number(metadata.phoneNumberToContact);
+    const paymentQrUrl = typeof metadata.paymentQrUrl === "string" ? metadata.paymentQrUrl : "";
+
+    // if ( /// Here an example of integer protection
+    //   !Number.isSafeInteger(phoneNumberToPay) ||
+    //   !Number.isSafeInteger(phoneNumberToContact) ||
+    //   paymentQrUrl.length === 0
+    // ) {
+    //   console.error(`🚨 PAYMENT METADATA INVALID: ${rid}`);
+    //   return c.json({ error: "Restaurant payment metadata is invalid" }, 500);
+    // }
+
+    return c.json({
+      phoneNumberToPay,
+      phoneNumberToContact,
+      paymentQrUrl,
+    }, 200);
+  } catch (error: any) {
+    console.error(`🚨 RESTAURANT PAYMENT ROUTE ERROR: ${error.message}`);
     return c.json({ error: "Internal Server Error" }, 500);
   }
 });

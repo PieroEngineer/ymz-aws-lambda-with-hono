@@ -5,6 +5,7 @@ import { requestsRouter } from "./routes/requests.js"; // 📦 Import your reque
 import { paymentsRouter } from "./routes/payments.js";
 import { restaurantsRouter } from "./routes/restaurants.js"; // 🔌 Import the new file
 import { usersRouter } from "./routes/users.js";
+import { feedbacksRouter } from "./routes/feedbacks.js";
 
 // Initialize the root Hono platform application
 const app = new Hono();
@@ -32,6 +33,7 @@ app.route("/payments", paymentsRouter);
 app.route("/requests", requestsRouter);
 app.route("/restaurants", restaurantsRouter); // 🏪 Funnels all /restaurants/* traffic here
 app.route("/users", usersRouter); // 🙋 Funnels all /users/* traffic straight into the new module
+app.route("/feedbacks", feedbacksRouter);
 
 /**
  * 🎯 BASE HEALTH CHECK ROUTE
