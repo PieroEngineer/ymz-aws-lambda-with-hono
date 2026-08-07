@@ -17,7 +17,7 @@ const TABLE_NAME = "YummiziTable";
 paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every router and move become them more abstract
 
     // 📩 Parse input payload safely from Hono context body
-    const body = await c.req.json().catch(() => ({}));  /// What of these IDs go in the URL?
+    const body = await c.req.json().catch(() => ({}));  /// What of these IDs go in the URL?  /// Should I include it inside the try that is bellow?
 
     const restaurantId: string = body.restaurantId; 
     const userId: string = body.userId;
@@ -33,12 +33,13 @@ paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every 
 
     // TODO: Only the users in ACCEPTED can do this 
 
-    // 1. Map your SKs into the required DynamoDB key structure
+    // Map your SKs into the required DynamoDB key structure
     const keys = orderSelections.map((selection) => ({
       PK: `REST#${restaurantId}`,
       SK: `RESOURCE#DISH#${selection.dishId}`,
     }));
 
+    ///     const batchResponse = await docClient.send(new BatchGetCommand({
     const command = new BatchGetCommand({ /// Analyze if a transaction is more proper for this situation
       RequestItems: {
         [TABLE_NAME]: {

@@ -1,7 +1,8 @@
 import { Hono } from "hono";
-import { QueryCommand, PutCommand, UpdateCommand, DynamoDBDocumentClient, DeleteCommand } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand, PutCommand, UpdateCommand, DynamoDBDocumentClient, DeleteCommand, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
 import { getDynamoDBClient } from "../aws/clientFactory.js";
 import { ablyKeyWS } from "../k.js";
+import { RequestIdentificatorsPayload } from "../types/requestTypes.js";
 
 // 🔌 Wrap standard Dynamo client into Document Client for comfortable JSON mappings
 const docClient = DynamoDBDocumentClient.from(getDynamoDBClient(), {
@@ -240,14 +241,13 @@ requestsRouter.get("/:restaurantId", async (c) => {
         // Return the exact structure matching your client-side type definitions
         return {
           requestId: requestId,
-
           userId: item.userId,
           userName: item.userName,
           groupSize: item.groupSize,
           onQueuedTimestamp: item.onQueuedTimestamp,
           state: item.state,
           specifics: item.specifics,
-          arrivlaTime: item.arrivlaTime // TODO: Correct the name
+          arrivlaTime: item.arrivlaTime // TODO: Correct the name "arrivalTimeInMinunes"
         };
       });
 
@@ -356,4 +356,67 @@ requestsRouter.post("/:restaurantId/update", async (c) => { /// (#1) Analize if 
     console.error(`🚨 UPDATE REQ ERROR: ${error.message}`);
     return c.json({ error: error.message || "Internal Server Error" }, 500);
   }
+});
+
+// TODO: This handler is only for the MVP, it should be replaced or complemented by reading a GSI table in future updates
+requestsRouter.post("/active", async (c) => { /// It's accepted to use POST for get data, but it doesn't matter at all because with GSI, we can use GET normally
+  
+  try{
+    // 📩 Parse input payload safely from Hono context body
+      const body = await c.req.json().catch(() => ({}));  /// What of these IDs go in the URL?
+
+      const requestsToUpdate: RequestIdentificatorsPayload[] = body.requestsToUpdate;  
+
+      // TODO: Cover the situation if it's empty
+
+      const formattedKeys = requestsToUpdate.map(item => ({
+        PK: `REST#${item.restaurantId}`,
+        SK: `REQ#${item.requestId}`
+      }));
+
+
+      // ⚡ Execute High-Speed Batch Read against DynamoDB Grid Core
+      const batchResponse = await docClient.send(new BatchGetCommand({
+        RequestItems: {
+          [TABLE_NAME]: {
+            Keys: formattedKeys,
+            ConsistentRead: false, // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB)
+          },
+        },
+      }));
+
+       // Extract results safely
+      const requestItems = batchResponse.Responses?.[TABLE_NAME] || [];
+
+      // Filter for active requests and transform them to match "TableRequestPayload"
+    const mappedPayloads = requestItems
+      .map((item) => {
+        const requestId = item.SK.replace("REQ#", ""); // Strip the prefix back out to get the clean ID
+        // const restaurantId = item.PK.replace("REST#", ""); // Strip the prefix back out to get the clean ID
+
+        // Return the exact structure matching your client-side type definitions
+        return {
+          requestId: requestId,
+          // restaurantId: restaurantId,
+          state: item.state,
+          // userId: item.userId,
+          // //X userName: item.userName,
+          // groupSize: item.groupSize,
+          // onQueuedTimestamp: item.onQueuedTimestamp,
+          // specifics: item.specifics,
+          // arrivlaTime: item.arrivlaTime // TODO: Correct the name
+        };
+      });
+
+    console.log(`1️⃣📦  Requested Table requests from the  \n${JSON.stringify(mappedPayloads)} \n`);
+
+    return c.json({
+      statuses: mappedPayloads
+    }, 200);
+  }
+  catch (error: any) {
+    console.error(`🚨 FETCH ACTIVE REQS ERROR: ${error.message}`);
+    return c.json({ error: error.message || "Internal Server Error" }, 500);
+  }
+
 });

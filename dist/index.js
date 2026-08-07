@@ -2489,7 +2489,7 @@ var isContentEncodingBinary = (contentEncoding) => {
 };
 
 // src/routes/requests.ts
-import { QueryCommand, PutCommand, UpdateCommand, DynamoDBDocumentClient, DeleteCommand } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand, PutCommand, UpdateCommand, DynamoDBDocumentClient, DeleteCommand, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
 
 // src/aws/clientFactory.ts
 import { S3Client } from "@aws-sdk/client-s3";
@@ -2684,7 +2684,7 @@ For Restaurant: ${rid}`);
         state: item.state,
         specifics: item.specifics,
         arrivlaTime: item.arrivlaTime
-        // TODO: Correct the name
+        // TODO: Correct the name "arrivalTimeInMinunes"
       };
     });
     console.log(`1\uFE0F\u20E3\u{1F4E6}  Initialized UI state feed: Found 
@@ -2775,9 +2775,52 @@ ${JSON.stringify(body)}`);
     return c.json({ error: error.message || "Internal Server Error" }, 500);
   }
 });
+requestsRouter.post("/active", async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const requestsToUpdate = body.requestsToUpdate;
+    const formattedKeys = requestsToUpdate.map((item) => ({
+      PK: `REST#${item.restaurantId}`,
+      SK: `REQ#${item.requestId}`
+    }));
+    const batchResponse = await docClient.send(new BatchGetCommand({
+      RequestItems: {
+        [TABLE_NAME]: {
+          Keys: formattedKeys,
+          ConsistentRead: false
+          // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB)
+        }
+      }
+    }));
+    const requestItems = batchResponse.Responses?.[TABLE_NAME] || [];
+    const mappedPayloads = requestItems.map((item) => {
+      const requestId = item.SK.replace("REQ#", "");
+      return {
+        requestId,
+        // restaurantId: restaurantId,
+        state: item.state
+        // userId: item.userId,
+        // //X userName: item.userName,
+        // groupSize: item.groupSize,
+        // onQueuedTimestamp: item.onQueuedTimestamp,
+        // specifics: item.specifics,
+        // arrivlaTime: item.arrivlaTime // TODO: Correct the name
+      };
+    });
+    console.log(`1\uFE0F\u20E3\u{1F4E6}  Requested Table requests from the  
+${JSON.stringify(mappedPayloads)} 
+`);
+    return c.json({
+      statuses: mappedPayloads
+    }, 200);
+  } catch (error) {
+    console.error(`\u{1F6A8} FETCH ACTIVE REQS ERROR: ${error.message}`);
+    return c.json({ error: error.message || "Internal Server Error" }, 500);
+  }
+});
 
 // src/routes/payments.ts
-import { QueryCommand as QueryCommand2, PutCommand as PutCommand2, DynamoDBDocumentClient as DynamoDBDocumentClient2, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand as QueryCommand2, PutCommand as PutCommand2, DynamoDBDocumentClient as DynamoDBDocumentClient2, BatchGetCommand as BatchGetCommand2 } from "@aws-sdk/lib-dynamodb";
 
 // src/services/paymentService.ts
 function calculateTotalCost(selectedDishes, dynamoDbResponsesWithPrices) {
@@ -2824,7 +2867,7 @@ paymentsRouter.post("/confirm", async (c) => {
     PK: `REST#${restaurantId}`,
     SK: `RESOURCE#DISH#${selection.dishId}`
   }));
-  const command = new BatchGetCommand({
+  const command = new BatchGetCommand2({
     /// Analyze if a transaction is more proper for this situation
     RequestItems: {
       [TABLE_NAME2]: {
@@ -2957,7 +3000,7 @@ paymentsRouter.get("/:restaurantId", async (c) => {
 });
 
 // src/routes/restaurants.ts
-import { QueryCommand as QueryCommand3, BatchGetCommand as BatchGetCommand2, GetCommand, DynamoDBDocumentClient as DynamoDBDocumentClient3 } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand as QueryCommand3, BatchGetCommand as BatchGetCommand3, GetCommand, DynamoDBDocumentClient as DynamoDBDocumentClient3 } from "@aws-sdk/lib-dynamodb";
 import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -2996,10 +3039,11 @@ restaurantsRouter.get("/feed", async (c) => {
       restaurantKeys.push({ PK: `REST#${rid}`, SK: "METADATA" });
       sectionMap[rid] = sectionName;
     }
-    const batchResponse = await docClient3.send(new BatchGetCommand2({
+    const batchResponse = await docClient3.send(new BatchGetCommand3({
       RequestItems: {
         [TABLE_NAME3]: {
           Keys: restaurantKeys
+          // ConsistentRead: false, // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB) /// Necessary here? // Consistent read is used when the read is just after a writting
         }
       }
     }));

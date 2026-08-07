@@ -87,7 +87,8 @@ restaurantsRouter.get("/feed", async (c) => { /// Maybe it's better to move this
     const batchResponse = await docClient.send(new BatchGetCommand({
       RequestItems: {
         [TABLE_NAME]: {
-          Keys: restaurantKeys
+          Keys: restaurantKeys,
+          // ConsistentRead: false, // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB) /// Necessary here? // Consistent read is used when the read is just after a writting
         }
       }
     }));
