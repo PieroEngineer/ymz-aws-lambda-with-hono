@@ -3417,26 +3417,27 @@ usersRouter.delete("/:userId/preferences/:prefId", async (c) => {
   }
 });
 
-// src/routes/feedbacks.ts
+// src/routes/contacts.ts
 import { PutCommand as PutCommand4, DynamoDBDocumentClient as DynamoDBDocumentClient5 } from "@aws-sdk/lib-dynamodb";
-var feedbacksRouter = new Hono2();
+var contactsRouter = new Hono2();
 var TABLE_NAME5 = "YummiziTable";
 var docClient5 = DynamoDBDocumentClient5.from(getDynamoDBClient(), {
   marshallOptions: { removeUndefinedValues: true }
 });
-feedbacksRouter.post("/final", async (c) => {
+contactsRouter.post("/feedback", async (c) => {
   try {
     const body = await c.req.json().catch(() => ({}));
     const userId = body.userId;
     const requestId = body.requestId;
     const conformDegree = body.conformDegree;
     const description = body.description;
-    if (!userId || !requestId) {
-      return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
+    if (!userId) {
+      return c.json({ error: "Missing userId" }, 400);
     }
     const newFinalFeedbackItem = {
-      PK: `FEEDBACK#${requestId}`,
-      SK: `USER#${userId}`,
+      PK: `USER#${userId}`,
+      SK: `FEEDBACK#${crypto.randomUUID()}`,
+      requestId,
       conformDegree,
       description
     };
@@ -3451,6 +3452,34 @@ feedbacksRouter.post("/final", async (c) => {
     }, 201);
   } catch (error) {
     console.error(`\u{1F6A8} SAVE FEEDBACK ERROR: ${error.message}`);
+    return c.json({ error: error.message || "Internal Server Error" }, 500);
+  }
+});
+contactsRouter.post("/restaurant", async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const userId = body.userId;
+    const restaurantName = body.restaurantName;
+    const restaurantContact = body.restaurantContact;
+    const restaurantComment = body.restaurantComment;
+    const newFinalContactItem = {
+      PK: `USER#${userId}`,
+      SK: `RCONTACT#${crypto.randomUUID()}`,
+      restaurantName,
+      restaurantContact,
+      restaurantComment
+    };
+    console.log("\u{1F4BD} Contact Item to save in DynamoDB", JSON.stringify(newFinalContactItem, null, 2));
+    await docClient5.send(new PutCommand4({
+      TableName: TABLE_NAME5,
+      Item: newFinalContactItem
+    }));
+    return c.json({
+      message: "Contact saved successfully"
+      // realtimeNotified: ablyDispatchSuccess
+    }, 201);
+  } catch (error) {
+    console.error(`\u{1F6A8} SAVE CONTACT ERROR: ${error.message}`);
     return c.json({ error: error.message || "Internal Server Error" }, 500);
   }
 });
@@ -3473,7 +3502,7 @@ app.route("/payments", paymentsRouter);
 app.route("/requests", requestsRouter);
 app.route("/restaurants", restaurantsRouter);
 app.route("/users", usersRouter);
-app.route("/feedbacks", feedbacksRouter);
+app.route("/contacts", contactsRouter);
 app.get("/", (c) => {
   return c.json({
     status: "healthy",
