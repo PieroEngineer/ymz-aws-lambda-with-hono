@@ -281,6 +281,7 @@ requestsRouter.post("/:restaurantId/update", async (c) => { /// (#1) Analize if 
 
     const normalizedState = String(newState); /// Necessary?
 
+    // TODO: Check if it's a valid status
     // TODO: Before update, check that the status transition is valid
 
     await docClient.send(new UpdateCommand({  // TODO: Include the updating of the acceptance's timestamp too
@@ -302,7 +303,8 @@ requestsRouter.post("/:restaurantId/update", async (c) => { /// (#1) Analize if 
 
     const channelName: Record<string, string> = {
       ACCEPTED: `request:${userId}`,
-      READY: `restaurant:${restaurantId}:ops`
+      READY: `restaurant:${restaurantId}:ops`,
+      PAY_TRIED: `restaurant:${restaurantId}:ops`,
     }
 
     const apiKey = ablyKeyWS;

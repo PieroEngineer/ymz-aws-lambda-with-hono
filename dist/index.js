@@ -2725,7 +2725,8 @@ ${JSON.stringify(body)}`);
     }));
     const channelName = {
       ACCEPTED: `request:${userId}`,
-      READY: `restaurant:${restaurantId}:ops`
+      READY: `restaurant:${restaurantId}:ops`,
+      PAY_TRIED: `restaurant:${restaurantId}:ops`
     };
     const apiKey = ablyKeyWS;
     let realtimeNotified = false;
