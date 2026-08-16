@@ -224,7 +224,7 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
     // This array will assemble all atomic actions for the single-table transaction block
     const transactionItems: any[] = [];
 
-        const presignedUrls: PresignedUrlMapping[] = [];
+    const presignedUrls: PresignedUrlMapping[] = [];
 
     // Resolve structural patterns targeting local environments vs live AWS
     // const isLocal = process.env.NODE_ENV === "development" || !!process.env.LOCALSTACK_ENDPOINT;
@@ -464,6 +464,7 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
   }
 });
 
+// Payment info 
 restaurantsRouter.get("/:restaurantId/payment", async (c) => {
   try {
     const rid = c.req.param("restaurantId");

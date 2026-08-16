@@ -1,11 +1,20 @@
 import { Hono } from "hono";
-import { getDynamoDBClient } from "../aws/clientFactory.js";
+import { getDynamoDBClient, getS3Client } from "../aws/clientFactory.js";
 import { QueryCommand, PutCommand, DynamoDBDocumentClient, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
 import { ablyKeyWS } from "../k.js";
 import { OrderItemPayload } from "../types/orderTypes.js";
 import { calculateTotalCost } from "../services/paymentService.js"
+import { PutObjectCommand } from "@aws-sdk/client-s3"; // 📦 Native S3 actions
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"; // 🔑 Presign signing engines
 
 export const paymentsRouter = new Hono();
+
+const s3Client = getS3Client();
+
+export interface PaymentImageReferencesPayload {  // TODO: Move to interfaces
+  uploadUrl: string; // Temporary token URL for client PUT request
+  publicUrl: string; // The permanent public read URL saved in DB
+}
 
 // 🔌 Wrap standard Dynamo client into Document Client for comfortable JSON mappings
 const docClient = DynamoDBDocumentClient.from(getDynamoDBClient(), {
@@ -13,6 +22,7 @@ const docClient = DynamoDBDocumentClient.from(getDynamoDBClient(), {
 });
 
 const TABLE_NAME = "YummiziTable";
+const BUCKET_NAME = "restaurant-assets";
 
 paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every router and move become them more abstract
 
@@ -62,7 +72,7 @@ paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every 
   const totalCostInCents = calculateTotalCost(orderSelections, dishItems);
   // console.log('💲🔎  Total price in cents is ', totalCostInCents);
 
-    // TODO: Handle the situation when a dish wasn't found. "BatchGet" doesn't notify that, so I leave this code as hint to handle it; continue the action to notify to the user and/or restaurant
+    // TODO: Handle the situation when a dish wasn't found. "BatchGet" doesn't notify that, so I leave this code as hint to handle it; continue the action to notify to the user and/or restaurant  /// If it's possible that the dish is not available, create the dish availability confirmation to the moment when the user go from menu selection to payment
     // Inside your Hono handler...
     // const requestedIds = ["123", "456", "789"];
     // const dishesFromDb = await batchGetDishes(keysToFetch);
@@ -74,6 +84,36 @@ paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every 
 
     // // 2. Reconstruct the array matching the exact input order, inserting null for missing items
     // const orderedResults = requestedIds.map(id => dbMap.get(id) || null);
+
+
+    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`
+
+    // 🔒 SECURITY STRATEGY: Generate a secure, predictable key coordinate path inside S3
+    // const s3Key = `restaurants/${rid}/menus/${pageId}.webp`;
+    const s3Key = `menus/${restaurantId}/${requestId}.webp`;  /// This shape could be useful when we use "S3 ObjectCreated event"
+
+    // 🕒 CACHE BUSTING: Generate a standard Unix epoch timestamp (in seconds)
+    const unixEpoch = Math.floor(Date.now() / 1000);
+
+    // 🎯 COMBINED SOLUTION: The database saves the static path + the dynamic timestamp version parameter
+    const publicUrl = `${s3BaseUrl}/${s3Key}?v=${unixEpoch}`;
+    console.log('🔎  publicUrl', publicUrl)
+
+    // 🛠️ ASSET SEPARATED HANDSHAKE CHECK: Craft a temporary cryptographic upload token signature URL
+    const uploadUrl = await getSignedUrl(
+      s3Client,
+      new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: s3Key,
+        ContentType: "image/webp" // Enforces binary media type constraints
+      }),
+      { expiresIn: 900 } // URL token token expires safely in 15 minutes
+    );
+
+    const paymentImageReferences: PaymentImageReferencesPayload = {
+      uploadUrl: uploadUrl,
+      publicUrl: publicUrl
+    }
 
     const basePaymentPreselection = {
         lastUpdateTimestamp: Date.now(),
@@ -168,6 +208,7 @@ paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every 
         message: "Order saved successfully and broadcast state synchronized",
         requestId: requestId,
         totalPriceInCents: totalCostInCents,
+        paymentImageReferences: paymentImageReferences
         // realtimeNotified: ablyDispatchSuccess
       }, 201);
   }

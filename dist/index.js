@@ -2846,11 +2846,15 @@ function calculateTotalCost(selectedDishes, dynamoDbResponsesWithPrices) {
 }
 
 // src/routes/payments.ts
+import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 var paymentsRouter = new Hono2();
+var s3Client = getS3Client();
 var docClient2 = DynamoDBDocumentClient2.from(getDynamoDBClient(), {
   marshallOptions: { removeUndefinedValues: true }
 });
 var TABLE_NAME2 = "YummiziTable";
+var BUCKET_NAME = "restaurant-assets";
 paymentsRouter.post("/confirm", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const restaurantId = body.restaurantId;
@@ -2882,6 +2886,26 @@ paymentsRouter.post("/confirm", async (c) => {
   const response = await docClient2.send(command);
   const dishItems = response.Responses?.[TABLE_NAME2] || [];
   const totalCostInCents = calculateTotalCost(orderSelections, dishItems);
+  const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`;
+  const s3Key = `menus/${restaurantId}/${requestId}.webp`;
+  const unixEpoch = Math.floor(Date.now() / 1e3);
+  const publicUrl = `${s3BaseUrl}/${s3Key}?v=${unixEpoch}`;
+  console.log("\u{1F50E}  publicUrl", publicUrl);
+  const uploadUrl = await getSignedUrl(
+    s3Client,
+    new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: s3Key,
+      ContentType: "image/webp"
+      // Enforces binary media type constraints
+    }),
+    { expiresIn: 900 }
+    // URL token token expires safely in 15 minutes
+  );
+  const paymentImageReferences = {
+    uploadUrl,
+    publicUrl
+  };
   const basePaymentPreselection = {
     lastUpdateTimestamp: Date.now(),
     userName,
@@ -2954,7 +2978,8 @@ paymentsRouter.post("/confirm", async (c) => {
     return c.json({
       message: "Order saved successfully and broadcast state synchronized",
       requestId,
-      totalPriceInCents: totalCostInCents
+      totalPriceInCents: totalCostInCents,
+      paymentImageReferences
       // realtimeNotified: ablyDispatchSuccess
     }, 201);
   } catch (error) {
@@ -3002,14 +3027,14 @@ paymentsRouter.get("/:restaurantId", async (c) => {
 // src/routes/restaurants.ts
 import { QueryCommand as QueryCommand3, BatchGetCommand as BatchGetCommand3, GetCommand, DynamoDBDocumentClient as DynamoDBDocumentClient3 } from "@aws-sdk/lib-dynamodb";
 import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-var s3Client = getS3Client();
+import { PutObjectCommand as PutObjectCommand2 } from "@aws-sdk/client-s3";
+import { getSignedUrl as getSignedUrl2 } from "@aws-sdk/s3-request-presigner";
+var s3Client2 = getS3Client();
 var docClient3 = DynamoDBDocumentClient3.from(getDynamoDBClient(), {
   marshallOptions: { removeUndefinedValues: true }
 });
 var TABLE_NAME3 = "YummiziTable";
-var BUCKET_NAME = "restaurant-assets";
+var BUCKET_NAME2 = "restaurant-assets";
 var restaurantsRouter = new Hono2();
 restaurantsRouter.get("/feed", async (c) => {
   try {
@@ -3017,7 +3042,7 @@ restaurantsRouter.get("/feed", async (c) => {
     if (!userId) {
       return c.json({ error: "Missing userId" }, 400);
     }
-    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`;
+    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
     const feedLinksResponse = await docClient3.send(new QueryCommand3({
       TableName: TABLE_NAME3,
       KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
@@ -3076,7 +3101,7 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
     if (!rid) {
       return c.json({ error: "restaurantId is required" }, 400);
     }
-    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`;
+    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
     const response = await docClient3.send(new QueryCommand3({
       TableName: TABLE_NAME3,
       KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
@@ -3142,7 +3167,7 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
     console.log("\u{1F37D}\uFE0F  dishes to update\n", dishes);
     const transactionItems = [];
     const presignedUrls = [];
-    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`;
+    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
     console.log(`\u{1F50E}\u{1F4C3}  Pages received:
 ${JSON.stringify(menuPages, null, 2)}`);
     for (const page of menuPages) {
@@ -3161,10 +3186,10 @@ ${JSON.stringify(menuPages, null, 2)}`);
         const unixEpoch = Math.floor(Date.now() / 1e3);
         const publicUrl = `${s3BaseUrl}/${s3Key}?v=${unixEpoch}`;
         console.log("\u{1F50E}  publicUrl", publicUrl);
-        const uploadUrl = await getSignedUrl(
-          s3Client,
-          new PutObjectCommand({
-            Bucket: BUCKET_NAME,
+        const uploadUrl = await getSignedUrl2(
+          s3Client2,
+          new PutObjectCommand2({
+            Bucket: BUCKET_NAME2,
             Key: s3Key,
             ContentType: "image/webp"
             // Enforces binary media type constraints
