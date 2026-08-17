@@ -78,8 +78,6 @@ requestsRouter.post("/create", async (c) => {
       ...baseRequestInfo
     };
 
-    // EXECUTING FIRE-AND-FORGET MOCK ABLY DISPATCH (Side Effect Secondary)
-    // Wrapped inside a fast transient network retry loop block
 
     const apiKey = ablyKeyWS;
 
@@ -150,21 +148,27 @@ requestsRouter.post("/create", async (c) => {
  * 🛰️ ROUTE: Cancel an existing Queue Request safely
  * PATH: POST /requests/:requestId/cancel
  */
-requestsRouter.post("/:requestId/cancel", async (c) => {
+requestsRouter.post("/:requestId/cancel", async (c) => {  /// Perhaps this route has double function in the future; it could cancel and deny
   try {
     // 🗺️ Extract context routing path variables
     const requestId = c.req.param("requestId");
     
     const body = await c.req.json().catch(() => ({}));
     const restaurantId = body.restaurantId;
+    const userId = body.userId;
+    const actor = body.actor;
+    // TODO: Later, the "userId" could be reached from dynamoDB because the transition verification will need it anyway
 
-    if (!requestId || !restaurantId) {
-      return c.json({ error: "Missing requestId or restaurantId" }, 400);
+    if (!requestId || !restaurantId || userId) {
+      return c.json({ error: "Missing requestId, userId or restaurantId" }, 400);
+    }
+
+    if (!actor) {
+      return c.json({ error: "Missing canceletion actor" }, 400);
     }
 
     const pk = `REST#${restaurantId}`;
     const sk = `REQ#${requestId}`;
-    const timestamp = new Date().toISOString();
 
     // /**
     //  * 🛡️ ATOMIC CONDITIONAL UPDATE
@@ -183,10 +187,78 @@ requestsRouter.post("/:requestId/cancel", async (c) => {
     //   }
     // }));
 
+    // TODO: Before removing, verify if the request status is removable.
     await docClient.send(new DeleteCommand({  // TODO: This is temporal  code and should be alternated with the commented code that is just above
       TableName: TABLE_NAME,
       Key: { PK: pk, SK: sk },
     }));
+
+    const clientPayload = {
+      requestId: requestId
+    }
+
+    const apiKey = ablyKeyWS;
+
+    if (!apiKey) {
+      throw new Error("ABLY_API_KEY is not defined");
+    }
+
+    const [username, password] = apiKey.split(':');
+    const credentials = btoa(`${username}:${password}`);
+
+    // const channelName: Record<string, string> = {
+    //   RESTAURANT: `request:${userId}`,
+    //   USER: `restaurant:${restaurantId}:ops`,
+    // }
+    let channelName
+    switch(actor){
+      case 'RESTAURANT':
+        channelName = `request:${userId}`
+      case 'USER':
+        channelName = `restaurant:${restaurantId}:ops`
+    }
+
+    const requestName = 'request-canceled'
+    
+    const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`
+
+    // We can extract this to an inline execution workflow
+    let ablyDispatchSuccess = false;
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    while (!ablyDispatchSuccess && attempts < maxAttempts) {  /// TODO: Follow the folder tree of AWS expert in Claude for more abstraction.
+      try {
+        attempts++;
+        const ablyResponse = await fetch(ablyEndpoint, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Basic ${credentials}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            name: requestName,   // The targeted subscriber frequency path matching mock constraints
+            data: clientPayload   // The exact TableRequestPayload DTO shape your staff app consumes
+          })
+        });
+
+        if (ablyResponse.ok) {
+          ablyDispatchSuccess = true;
+          console.log(`📡 [Attempt ${attempts}] Successfully broadcast table request cancelation event to Ably channel: ${channelName}`);
+          console.log(`📦  Data to send: ${JSON.stringify({name: requestName, data: clientPayload}, null, 2)}`);
+          
+        } else {
+          console.warn(`⚠️ [Attempt ${attempts}] Mock Ably returned a status error code: ${ablyResponse.status}`);
+        }
+      } catch (netErr: any) {
+        console.warn(`⚠️ [Attempt ${attempts}] Network failure transmitting data payload to mock Ably server: ${netErr.message}`);
+      }
+    }
+
+    // Logging total failure fallback trace benchmarks if the mock server is down entirely
+    if (!ablyDispatchSuccess) {
+      console.error(`🚨 CRITICAL: Failed to stream real-time broadcast alert data past ${maxAttempts} attempts. Database state remains fully valid.`);
+    }
 
     return c.json({
       message: "Request cancelled successfully",
@@ -268,6 +340,8 @@ requestsRouter.post("/:restaurantId/update", async (c) => { /// (#1) Analize if 
     const body = await c.req.json().catch(() => ({}));
     const requestId = body.requestId;
     const newState = body.newState;
+    
+    /// When you get the request object from DynamoDB, it's possible or necessary you could get the userID from there and not from the restaurant's client side 
     const userId = body.userId; /// (#1) if yes, consider if the secure way to get the "userId" and "restaurantId" is via dynamoDB's Query and not from the client 
 
     console.log(`1️⃣📦  Data arrived from restaurant ${restaurantId} \n${JSON.stringify(body)}`);
@@ -301,10 +375,13 @@ requestsRouter.post("/:restaurantId/update", async (c) => { /// (#1) Analize if 
     // 2. Cancel those request in DynamoBD (In MVP, it's deleting them, but then is updating the attribute "onCancelTimestamp") 
     // 3. Use the batch publish of Ably to cancel the table request of the other restaurants (In claude "AWS expert" is the code ) 
 
-    const channelName: Record<string, string> = {
-      ACCEPTED: `request:${userId}`,
-      READY: `restaurant:${restaurantId}:ops`,
-      PAY_TRIED: `restaurant:${restaurantId}:ops`,
+    let channelName
+    switch(normalizedState){
+      case 'ACCEPTED':
+        channelName = `request:${userId}`
+      case 'READY':
+      case 'PAY_TRIED':
+        channelName = `restaurant:${restaurantId}:ops`
     }
 
     const apiKey = ablyKeyWS;
@@ -314,8 +391,8 @@ requestsRouter.post("/:restaurantId/update", async (c) => { /// (#1) Analize if 
       const [username, password] = apiKey.split(":");
       const credentials = btoa(`${username}:${password}`);
       //X const channelName = `request:${userId}`;  // In mobile -> "request:$userId"
-      console.log(`1️⃣📺  Channel to subscrive ${channelName[normalizedState]}`);
-      const ablyEndpoint = `https://rest.ably.io/channels/${channelName[normalizedState]}/messages`;
+      console.log(`1️⃣📺  Channel to subscrive ${channelName}`);
+      const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
 
       try {
         const ablyResponse = await fetch(ablyEndpoint, {
@@ -360,7 +437,7 @@ requestsRouter.post("/:restaurantId/update", async (c) => { /// (#1) Analize if 
   }
 });
 
-// TODO: This handler is only for the MVP, it should be replaced or complemented by reading a GSI table in future updates
+// TODO: This handler is only for the MVP, it should be replaced or complemented by reading a GSI table in future updates // Idea for the GSI: the SK could be the status of "ACTIVE", "DELETED", etc
 requestsRouter.post("/active", async (c) => { /// It's accepted to use POST for get data, but it doesn't matter at all because with GSI, we can use GET normally
   
   try{
