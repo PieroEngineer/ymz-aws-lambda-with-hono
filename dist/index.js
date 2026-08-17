@@ -2628,18 +2628,80 @@ requestsRouter.post("/:requestId/cancel", async (c) => {
   try {
     const requestId = c.req.param("requestId");
     const body = await c.req.json().catch(() => ({}));
+    console.log(` Body of the cancellation ${JSON.stringify(body, null, 2)}`);
     const restaurantId = body.restaurantId;
-    if (!requestId || !restaurantId) {
-      return c.json({ error: "Missing requestId or restaurantId" }, 400);
+    const userId = body.userId;
+    const actor = body.actor;
+    if (!restaurantId) {
+      return c.json({ error: "Missing restaurantId" }, 400);
+    }
+    if (!requestId) {
+      return c.json({ error: "Missing requestId" }, 400);
+    }
+    if (!userId) {
+      return c.json({ error: "Missing userId" }, 400);
+    }
+    if (!actor) {
+      return c.json({ error: "Missing cancellation actor" }, 400);
     }
     const pk = `REST#${restaurantId}`;
     const sk = `REQ#${requestId}`;
-    const timestamp = (/* @__PURE__ */ new Date()).toISOString();
     await docClient.send(new DeleteCommand({
       // TODO: This is temporal  code and should be alternated with the commented code that is just above
       TableName: TABLE_NAME,
       Key: { PK: pk, SK: sk }
     }));
+    const clientPayload = {
+      requestId
+    };
+    const apiKey = ablyKeyWS;
+    if (!apiKey) {
+      throw new Error("ABLY_API_KEY is not defined");
+    }
+    const [username, password] = apiKey.split(":");
+    const credentials = btoa(`${username}:${password}`);
+    let channelName;
+    switch (actor) {
+      case "RESTAURANT":
+        channelName = `request:${userId}`;
+      case "USER":
+        channelName = `restaurant:${restaurantId}:ops`;
+    }
+    const requestName = "request-canceled";
+    const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
+    let ablyDispatchSuccess = false;
+    let attempts = 0;
+    const maxAttempts = 3;
+    while (!ablyDispatchSuccess && attempts < maxAttempts) {
+      try {
+        attempts++;
+        const ablyResponse = await fetch(ablyEndpoint, {
+          method: "POST",
+          headers: {
+            "Authorization": `Basic ${credentials}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            name: requestName,
+            // The targeted subscriber frequency path matching mock constraints
+            data: clientPayload
+            // The exact TableRequestPayload DTO shape your staff app consumes
+          })
+        });
+        if (ablyResponse.ok) {
+          ablyDispatchSuccess = true;
+          console.log(`\u{1F4E1} [Attempt ${attempts}] Successfully broadcast table request cancelation event to Ably channel: ${channelName}`);
+          console.log(`\u{1F4E6}  Data to send: ${JSON.stringify({ name: requestName, data: clientPayload }, null, 2)}`);
+        } else {
+          console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Mock Ably returned a status error code: ${ablyResponse.status}`);
+        }
+      } catch (netErr) {
+        console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Network failure transmitting data payload to mock Ably server: ${netErr.message}`);
+      }
+    }
+    if (!ablyDispatchSuccess) {
+      console.error(`\u{1F6A8} CRITICAL: Failed to stream real-time broadcast alert data past ${maxAttempts} attempts. Database state remains fully valid.`);
+    }
     return c.json({
       message: "Request cancelled successfully"
       // onCancellationTimestamp: timestamp
@@ -2723,18 +2785,24 @@ ${JSON.stringify(body)}`);
         ":state": normalizedState
       }
     }));
-    const channelName = {
-      ACCEPTED: `request:${userId}`,
-      READY: `restaurant:${restaurantId}:ops`,
-      PAY_TRIED: `restaurant:${restaurantId}:ops`
-    };
+    let channelName;
+    switch (normalizedState) {
+      case "ACCEPTED":
+        channelName = `request:${userId}`;
+        break;
+      case "READY":
+      // When the user notifies that they want to go to the restaurant
+      case "PAY_TRIED":
+        channelName = `restaurant:${restaurantId}:ops`;
+        break;
+    }
     const apiKey = ablyKeyWS;
     let realtimeNotified = false;
     if (apiKey) {
       const [username, password] = apiKey.split(":");
       const credentials = btoa(`${username}:${password}`);
-      console.log(`1\uFE0F\u20E3\u{1F4FA}  Channel to subscrive ${channelName[normalizedState]}`);
-      const ablyEndpoint = `https://rest.ably.io/channels/${channelName[normalizedState]}/messages`;
+      console.log(`1\uFE0F\u20E3\u{1F4FA}  Channel to emit ${channelName}`);
+      const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
       try {
         const ablyResponse = await fetch(ablyEndpoint, {
           method: "POST",

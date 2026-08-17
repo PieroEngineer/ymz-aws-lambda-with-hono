@@ -154,17 +154,19 @@ requestsRouter.post("/:requestId/cancel", async (c) => {  /// Perhaps this route
     const requestId = c.req.param("requestId");
     
     const body = await c.req.json().catch(() => ({}));
+    console.log(` Body of the cancellation ${JSON.stringify(body, null, 2)}`);
     const restaurantId = body.restaurantId;
     const userId = body.userId;
     const actor = body.actor;
     // TODO: Later, the "userId" could be reached from dynamoDB because the transition verification will need it anyway
 
-    if (!requestId || !restaurantId || userId) {
-      return c.json({ error: "Missing requestId, userId or restaurantId" }, 400);
-    }
+    if (!restaurantId) { return c.json({ error: "Missing restaurantId" }, 400); }
+    if (!requestId ) { return c.json({ error: "Missing requestId" }, 400); }
+    if (!userId) { return c.json({ error: "Missing userId" }, 400); }
+
 
     if (!actor) {
-      return c.json({ error: "Missing canceletion actor" }, 400);
+      return c.json({ error: "Missing cancellation actor" }, 400);
     }
 
     const pk = `REST#${restaurantId}`;
@@ -377,11 +379,13 @@ requestsRouter.post("/:restaurantId/update", async (c) => { /// (#1) Analize if 
 
     let channelName
     switch(normalizedState){
-      case 'ACCEPTED':
+      case 'ACCEPTED':  // When the restaurant notifies that the customer's request is accepted
         channelName = `request:${userId}`
-      case 'READY':
-      case 'PAY_TRIED':
+        break;
+      case 'READY':   // When the user notifies that they want to go to the restaurant
+      case 'PAY_TRIED':   // When the user notifies that it's about to pay
         channelName = `restaurant:${restaurantId}:ops`
+        break;
     }
 
     const apiKey = ablyKeyWS;
@@ -391,7 +395,7 @@ requestsRouter.post("/:restaurantId/update", async (c) => { /// (#1) Analize if 
       const [username, password] = apiKey.split(":");
       const credentials = btoa(`${username}:${password}`);
       //X const channelName = `request:${userId}`;  // In mobile -> "request:$userId"
-      console.log(`1️⃣📺  Channel to subscrive ${channelName}`);
+      console.log(`1️⃣📺  Channel to emit ${channelName}`);
       const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
 
       try {
