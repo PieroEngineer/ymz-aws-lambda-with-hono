@@ -364,7 +364,7 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
               dishName: dish.name,
               priceCents: Number(dish.priceCents || 0),
               prepTime: Number(dish.prepTime || 0),
-              isOutOfStock: false, // Per request constraint: always false for now
+              isOutOfStock: dish.isOutOfStock,
               menuPageId: dish.menuPageId,
               coordinateXInMenu: dish.coordinateXInMenu,
               coordinateYInMenu: dish.coordinateYInMenu,
