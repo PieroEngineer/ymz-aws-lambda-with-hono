@@ -3094,7 +3094,7 @@ paymentsRouter.get("/:restaurantId", async (c) => {
 });
 
 // src/routes/restaurants.ts
-import { QueryCommand as QueryCommand3, BatchGetCommand as BatchGetCommand3, GetCommand, DynamoDBDocumentClient as DynamoDBDocumentClient3 } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand as QueryCommand3, BatchGetCommand as BatchGetCommand3, GetCommand, DynamoDBDocumentClient as DynamoDBDocumentClient3, UpdateCommand as UpdateCommand2 } from "@aws-sdk/lib-dynamodb";
 import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { PutObjectCommand as PutObjectCommand2 } from "@aws-sdk/client-s3";
 import { getSignedUrl as getSignedUrl2 } from "@aws-sdk/s3-request-presigner";
@@ -3105,6 +3105,190 @@ var docClient3 = DynamoDBDocumentClient3.from(getDynamoDBClient(), {
 var TABLE_NAME3 = "YummiziTable";
 var BUCKET_NAME2 = "restaurant-assets";
 var restaurantsRouter = new Hono2();
+restaurantsRouter.post("/:restaurantId/create", async (c) => {
+});
+restaurantsRouter.get("/:restaurantId/info", async (c) => {
+  try {
+    const restaurantId = c.req.param("restaurantId");
+    if (!restaurantId) {
+      return c.json({ error: `Missing restaurantId ${restaurantId}` }, 400);
+    }
+    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
+    const command = new GetCommand({
+      TableName: TABLE_NAME3,
+      Key: {
+        PK: `REST#${restaurantId}`,
+        SK: "METADATA"
+      },
+      // Set to true only if you strictly need the absolute latest write
+      ConsistentRead: false
+    });
+    const response = await docClient3.send(command);
+    if (!response.Item) {
+      return c.json({ error: "Item not found" }, 404);
+    }
+    const restaurantItem = response.Item;
+    console.log(`\u{1F50E}\u{1F3EA}  Restaurant info fetched for ID: ${restaurantId}
+`, restaurantItem);
+    return c.json(
+      {
+        restaurantId: restaurantItem.PK.replace("REST#", ""),
+        restaurantName: restaurantItem.name,
+        logoUrl: restaurantItem.logoUrl,
+        latitude: restaurantItem.latitude,
+        // longitude: restaurantItem.longitude,
+        // openTime: restaurantItem.openTime,
+        closeTime: restaurantItem.closeTime,
+        dishesToShowUrls: [restaurantItem.dishesToShowUrl1, restaurantItem.dishesToShowUrl2, restaurantItem.dishesToShowUrl3],
+        phoneNumberToPay: restaurantItem.phoneNumberToPay,
+        phoneNumberToContact: restaurantItem.phoneNumberToContact,
+        paymentQrUrl: restaurantItem.paymentQrUrl
+      }
+    );
+  } catch (error) {
+    return c.json({ error: "Internal Server Error", details: error.message }, 500);
+  }
+});
+restaurantsRouter.post("/:restaurantId/info", async (c) => {
+  try {
+    const restaurantId = c.req.param("restaurantId");
+    if (!restaurantId) {
+      return c.json({ error: "restaurantId is required" }, 400);
+    }
+    const body = await c.req.json().catch(() => ({}));
+    const restaurantName = body.restaurantName;
+    const logoUrlRequired = body.logoUrlRequired;
+    const latitude = body.latitude;
+    const longitude = body.longitude;
+    const dishesToShowUrlsRequired = body.dishesToShowUrlsRequired;
+    const phoneNumberToPay = body.phoneNumberToPay;
+    const phoneNumberToContact = body.phoneNumberToContact;
+    const paymentQrUrlsRequired = body.paymentQrUrlsRequired;
+    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
+    console.log(`\u{1F50E}\u{1F3EA}  Restaurant info received for ID: ${restaurantId}
+`, JSON.stringify(body, null, 2));
+    const dataToUpdate = {
+      name: restaurantName,
+      latitude,
+      longitude,
+      // openTime: openTime,
+      // closeTime: closeTime,
+      phoneNumberToPay,
+      phoneNumberToContact
+    };
+    let logoUploadUrl;
+    if (logoUrlRequired) {
+      const logoS3Key = `logo/${restaurantId}.webp`;
+      const logoUnixEpoch = Math.floor(Date.now() / 1e3);
+      const logoPublicUrl = `${s3BaseUrl}/${logoS3Key}?v=${logoUnixEpoch}`;
+      console.log("\u{1F50E}\u{1F5BC}\uFE0F  Logo public Url", logoPublicUrl);
+      logoUploadUrl = await getSignedUrl2(
+        s3Client2,
+        new PutObjectCommand2({
+          Bucket: BUCKET_NAME2,
+          Key: logoS3Key,
+          ContentType: "image/webp"
+          // Enforces binary media type constraints
+        }),
+        { expiresIn: 900 }
+        // URL token token expires safely in 15 minutes
+      );
+      dataToUpdate.logoUrl = logoPublicUrl;
+      console.log("\u2705\u{1F5BC}\uFE0F  Logo upload Url");
+    } else {
+      logoUploadUrl = "";
+    }
+    const dishImageSelection = [
+      (dishImageUrl) => {
+        dataToUpdate.dishesToShowUrl1 = dishImageUrl;
+      },
+      (dishImageUrl) => {
+        dataToUpdate.dishesToShowUrl2 = dishImageUrl;
+      },
+      (dishImageUrl) => {
+        dataToUpdate.dishesToShowUrl3 = dishImageUrl;
+      }
+    ];
+    const dishesToUploadShowUrls = new Array(3);
+    for (let i = 0; i < 3; i++) {
+      if (dishesToShowUrlsRequired[i] === true) {
+        const s3Key = `front/${i}/${restaurantId}.webp`;
+        const unixEpoch = Math.floor(Date.now() / 1e3);
+        const dishImagePublicUrl = `${s3BaseUrl}/${s3Key}?v=${unixEpoch}`;
+        console.log(`\u{1F50E}\u{1F5BC}\uFE0F  dish ${i} to show image public Url`, dishImagePublicUrl);
+        dishImageSelection[i](dishImagePublicUrl);
+        const dishImageUploadUrl = await getSignedUrl2(
+          s3Client2,
+          new PutObjectCommand2({
+            Bucket: BUCKET_NAME2,
+            Key: s3Key,
+            ContentType: "image/webp"
+            // Enforces binary media type constraints
+          }),
+          { expiresIn: 900 }
+          // URL token token expires safely in 15 minutes
+        );
+        dishesToUploadShowUrls[i] = dishImageUploadUrl;
+        console.log("\u2705\u{1F5BC}\uFE0F  Dish image upload Url");
+      } else {
+        dishesToUploadShowUrls[i] = "";
+      }
+    }
+    let QrUploadUrl;
+    if (paymentQrUrlsRequired) {
+      const qrS3Key = `qr/${restaurantId}.webp`;
+      const qrUnixEpoch = Math.floor(Date.now() / 1e3);
+      const QrPublicUrl = `${s3BaseUrl}/${qrS3Key}?v=${qrUnixEpoch}`;
+      console.log("\u{1F50E}\u{1F5BC}\uFE0F  QR public Url", QrPublicUrl);
+      dataToUpdate.paymentQrUrl = QrPublicUrl;
+      QrUploadUrl = await getSignedUrl2(
+        s3Client2,
+        new PutObjectCommand2({
+          Bucket: BUCKET_NAME2,
+          Key: qrS3Key,
+          ContentType: "image/webp"
+          // Enforces binary media type constraints
+        }),
+        { expiresIn: 900 }
+        // URL token token expires safely in 15 minutes
+      );
+      console.log("\u2705\u{1F5BC}\uFE0F  QR upload Url");
+    } else {
+      QrUploadUrl = "";
+    }
+    const updateEntries = Object.entries(dataToUpdate).filter(([, value]) => value !== void 0);
+    const expressionAttributeNames = {};
+    const expressionAttributeValues = {};
+    const updateExpressions = updateEntries.map(([field, value], index) => {
+      const nameToken = `#field${index}`;
+      const valueToken = `:value${index}`;
+      expressionAttributeNames[nameToken] = field;
+      expressionAttributeValues[valueToken] = value;
+      return `${nameToken} = ${valueToken}`;
+    });
+    if (updateExpressions.length > 0) {
+      await docClient3.send(new UpdateCommand2({
+        TableName: TABLE_NAME3,
+        Key: {
+          PK: `REST#${restaurantId}`,
+          SK: "METADATA"
+        },
+        UpdateExpression: `SET ${updateExpressions.join(", ")}`,
+        ExpressionAttributeNames: expressionAttributeNames,
+        ExpressionAttributeValues: expressionAttributeValues
+      }));
+    }
+    console.log(`\u2705\u2934\uFE0F Synchronized restaurant info: ${restaurantId}`);
+    return c.json({
+      logoPresignedUrl: logoUploadUrl,
+      dishesToShowPresignedUrls: dishesToUploadShowUrls,
+      paymentQrPresignedUrl: QrUploadUrl
+    }, 200);
+  } catch (error) {
+    console.error(`\u{1F6A8} SYNC RESTAURANT INFO ERROR -> ${error.message}`);
+    return c.json({ error: "Internal Server Error" }, 500);
+  }
+});
 restaurantsRouter.get("/feed", async (c) => {
   try {
     const userId = c.req.query("userId");
@@ -3137,14 +3321,14 @@ restaurantsRouter.get("/feed", async (c) => {
       RequestItems: {
         [TABLE_NAME3]: {
           Keys: restaurantKeys
-          // ConsistentRead: false, // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB) /// Necessary here? // Consistent read is used when the read is just after a writting
+          // ConsistentRead: false, // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB) /// FIXME: Necessary here? // Consistent read is used when the read is just after a writting
         }
       }
     }));
     const rawRestaurants = batchResponse.Responses?.[TABLE_NAME3] || [];
     const formattedFeed = rawRestaurants.map((res) => {
       const rid = res.PK.replace("REST#", "");
-      const originalDishes = res.dishesToShow || [];
+      const originalDishes = [res.dishesToShow1 || "", res.dishesToShow2 || "", res.dishesToShow3 || ""];
       return {
         id: rid,
         name: res.name,

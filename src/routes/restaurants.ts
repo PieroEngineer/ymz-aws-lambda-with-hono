@@ -1,12 +1,23 @@
 import { Hono } from "hono";
-import { QueryCommand, BatchGetCommand, GetCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand, BatchGetCommand, GetCommand, DynamoDBDocumentClient, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { getDynamoDBClient, getS3Client } from "../aws/clientFactory.js";
 import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { PutObjectCommand } from "@aws-sdk/client-s3"; // 📦 Native S3 actions
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"; // 🔑 Presign signing engines
+import { RestaurantDataToUpdate } from "../types/restaurantTypes.js";
 
 // Initialize the S3 Client engine instance
 const s3Client = getS3Client();
+
+// FIXME: Use the time fixer for all the routers
+// const serverDate = new Date()
+  
+//   // Formats the server's UTC time to Peru local time (PET)
+//   const peruTime = serverDate.toLocaleString("es-PE", { 
+//     timeZone: "America/Lima",
+//     dateStyle: "short",
+//     timeStyle: "medium"
+//   })
 
 //TODO: Change the URLs by keys, the entire link shouldn't be sent
 
@@ -33,6 +44,244 @@ const BUCKET_NAME = "restaurant-assets";
 
 // 📦 Create an isolated sub-router specifically for restaurant data processing
 export const restaurantsRouter = new Hono();
+
+restaurantsRouter.post("/:restaurantId/create", async (c) => {
+  // TODO: Here the restaurant is initialized with the default values when the restaurant register
+})
+
+restaurantsRouter.get("/:restaurantId/info", async (c) => {
+  try{
+    const restaurantId = c.req.param("restaurantId");
+
+     if (!restaurantId) {
+      return c.json({ error: `Missing restaurantId ${restaurantId}` }, 400);
+     }
+
+    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`
+
+    const command = new GetCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `REST#${restaurantId}`,
+        SK: 'METADATA'
+      },
+      // Set to true only if you strictly need the absolute latest write
+      ConsistentRead: false 
+    })
+    const response = await docClient.send(command)
+
+    if (!response.Item) {
+      return c.json({ error: 'Item not found' }, 404)
+    }
+
+    const restaurantItem = response.Item
+
+    console.log(`🔎🏪  Restaurant info fetched for ID: ${restaurantId}\n`, restaurantItem)
+
+    return c.json(
+      {
+        restaurantId: restaurantItem.PK.replace('REST#', ''),
+        restaurantName: restaurantItem.name,
+        logoUrl: restaurantItem.logoUrl,
+        latitude: restaurantItem.latitude,
+        // longitude: restaurantItem.longitude,
+        // openTime: restaurantItem.openTime,
+        closeTime: restaurantItem.closeTime,
+        dishesToShowUrls: [restaurantItem.dishesToShowUrl1, restaurantItem.dishesToShowUrl2, restaurantItem.dishesToShowUrl3],
+        phoneNumberToPay: restaurantItem.phoneNumberToPay,
+        phoneNumberToContact: restaurantItem.phoneNumberToContact,
+        paymentQrUrl: restaurantItem.paymentQrUrl,
+      }
+    )
+
+  }
+  catch(error: any){
+    return c.json({ error: 'Internal Server Error', details: error.message }, 500)
+  }
+});
+
+// TODO: It really needs the improvement of modularize the presigned URL obtaining
+// TODO: Optimize it with the dynamic attribute selection logic 
+restaurantsRouter.post("/:restaurantId/info", async (c) => {  
+  try{
+    const restaurantId = c.req.param("restaurantId");
+    if (!restaurantId) {
+      return c.json({ error: "restaurantId is required" }, 400);
+    }
+
+    const body = await c.req.json().catch(() => ({}));
+
+    const restaurantName: string = body.restaurantName
+    const logoUrlRequired: boolean = body.logoUrlRequired
+    const latitude: number = body.latitude
+    const longitude: number = body.longitude
+    const dishesToShowUrlsRequired: [boolean, boolean, boolean] = body.dishesToShowUrlsRequired
+    const phoneNumberToPay: string = body.phoneNumberToPay
+    const phoneNumberToContact: string = body.phoneNumberToContact
+    const paymentQrUrlsRequired: boolean = body.paymentQrUrlsRequired
+
+    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`
+
+    console.log(`🔎🏪  Restaurant info received for ID: ${restaurantId}\n`, JSON.stringify(body , null, 2))
+
+    const dataToUpdate: RestaurantDataToUpdate = {      
+      name: restaurantName,
+      latitude: latitude,
+      longitude: longitude,
+      // openTime: openTime,
+      // closeTime: closeTime,
+      phoneNumberToPay: phoneNumberToPay,
+      phoneNumberToContact: phoneNumberToContact
+    }
+
+    
+    let logoUploadUrl
+    if(logoUrlRequired){
+
+      // 🔒 SECURITY STRATEGY: Generate a secure, predictable key coordinate path inside S3
+    const logoS3Key = `logo/${restaurantId}.webp`;
+    
+    // 🕒 CACHE BUSTING: Generate a standard Unix epoch timestamp (in seconds)
+    const logoUnixEpoch = Math.floor(Date.now() / 1000);
+
+    // 🎯 COMBINED SOLUTION: The database saves the static path + the dynamic timestamp version parameter
+    const logoPublicUrl = `${s3BaseUrl}/${logoS3Key}?v=${logoUnixEpoch}`;
+    console.log('🔎🖼️  Logo public Url', logoPublicUrl)
+      
+      // 🛠️ ASSET SEPARATED HANDSHAKE CHECK: Craft a temporary cryptographic upload token signature URL
+      logoUploadUrl = await getSignedUrl(
+        s3Client,
+        new PutObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: logoS3Key,
+          ContentType: "image/webp" // Enforces binary media type constraints
+        }),
+        { expiresIn: 900 } // URL token token expires safely in 15 minutes
+      );
+
+      dataToUpdate.logoUrl = logoPublicUrl
+
+      console.log('✅🖼️  Logo upload Url')
+    }
+    else{
+      logoUploadUrl = ''
+    }
+
+    const dishImageSelection = [
+      (dishImageUrl: string) => {dataToUpdate.dishesToShowUrl1 = dishImageUrl},
+      (dishImageUrl: string) => {dataToUpdate.dishesToShowUrl2 = dishImageUrl},
+      (dishImageUrl: string) => {dataToUpdate.dishesToShowUrl3 = dishImageUrl},
+    ]
+
+    const dishesToUploadShowUrls = new Array<String>(3)
+    for (let i = 0; i < 3; i++) {
+      
+      if (dishesToShowUrlsRequired[i] === true) {
+        
+        // 🔒 SECURITY STRATEGY: Generate a secure, predictable key coordinate path inside S3
+        const s3Key = `front/${i}/${restaurantId}.webp`;
+        
+        // 🕒 CACHE BUSTING: Generate a standard Unix epoch timestamp (in seconds)
+        const unixEpoch = Math.floor(Date.now() / 1000);
+  
+        // 🎯 COMBINED SOLUTION: The database saves the static path + the dynamic timestamp version parameter
+        const dishImagePublicUrl = `${s3BaseUrl}/${s3Key}?v=${unixEpoch}`;
+        console.log(`🔎🖼️  dish ${i} to show image public Url`, dishImagePublicUrl)
+  
+        dishImageSelection[i](dishImagePublicUrl)
+
+        // 🛠️ ASSET SEPARATED HANDSHAKE CHECK: Craft a temporary cryptographic upload token signature URL
+        const dishImageUploadUrl = await getSignedUrl(
+          s3Client,
+          new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: s3Key,
+            ContentType: "image/webp" // Enforces binary media type constraints
+          }),
+          { expiresIn: 900 } // URL token token expires safely in 15 minutes
+        );
+
+        dishesToUploadShowUrls[i] = dishImageUploadUrl
+
+      console.log('✅🖼️  Dish image upload Url')
+      }
+      else{
+        dishesToUploadShowUrls[i] = ''
+      }
+    }
+
+    
+    let QrUploadUrl
+    if(paymentQrUrlsRequired){
+      
+      // 🔒 SECURITY STRATEGY: Generate a secure, predictable key coordinate path inside S3
+      const qrS3Key = `qr/${restaurantId}.webp`;
+      
+      // 🕒 CACHE BUSTING: Generate a standard Unix epoch timestamp (in seconds)
+      const qrUnixEpoch = Math.floor(Date.now() / 1000);
+  
+      // 🎯 COMBINED SOLUTION: The database saves the static path + the dynamic timestamp version parameter
+      const QrPublicUrl = `${s3BaseUrl}/${qrS3Key}?v=${qrUnixEpoch}`;
+      console.log('🔎🖼️  QR public Url', QrPublicUrl)
+
+      dataToUpdate.paymentQrUrl = QrPublicUrl
+
+      // 🛠️ ASSET SEPARATED HANDSHAKE CHECK: Craft a temporary cryptographic upload token signature URL
+      QrUploadUrl = await getSignedUrl(
+        s3Client,
+        new PutObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: qrS3Key,
+          ContentType: "image/webp" // Enforces binary media type constraints
+        }),
+        { expiresIn: 900 } // URL token token expires safely in 15 minutes
+      );
+
+      console.log('✅🖼️  QR upload Url')
+    }
+    else{
+      QrUploadUrl = ''
+    }
+
+    const updateEntries = Object.entries(dataToUpdate).filter(([, value]) => value !== undefined);  /// What is cheaper between doing this and read the data from dynamoDB previously?
+    const expressionAttributeNames: Record<string, string> = {};
+    const expressionAttributeValues: Record<string, string | number> = {};
+    const updateExpressions = updateEntries.map(([field, value], index) => {
+      const nameToken = `#field${index}`;
+      const valueToken = `:value${index}`;
+
+      expressionAttributeNames[nameToken] = field;
+      expressionAttributeValues[valueToken] = value;
+      return `${nameToken} = ${valueToken}`;
+    });
+
+    if (updateExpressions.length > 0) {
+      await docClient.send(new UpdateCommand({
+        TableName: TABLE_NAME,
+        Key: {
+          PK: `REST#${restaurantId}`,
+          SK: "METADATA",
+        },
+        UpdateExpression: `SET ${updateExpressions.join(", ")}`,
+        ExpressionAttributeNames: expressionAttributeNames,
+        ExpressionAttributeValues: expressionAttributeValues,
+      }));
+    }
+
+    console.log(`✅⤴️ Synchronized restaurant info: ${restaurantId}`);
+    return c.json({
+      logoPresignedUrl: logoUploadUrl,
+      dishesToShowPresignedUrls: dishesToUploadShowUrls,
+      paymentQrPresignedUrl: QrUploadUrl,
+    }, 200);
+
+  }
+  catch(error: any){
+    console.error(`🚨 SYNC RESTAURANT INFO ERROR -> ${error.message}`);
+    return c.json({ error: "Internal Server Error" }, 500);
+  }
+});
+
 
 /**
  * 🛰️ ROUTE: Retrieve the personalized user restaurant feed
@@ -88,7 +337,7 @@ restaurantsRouter.get("/feed", async (c) => { /// Maybe it's better to move this
       RequestItems: {
         [TABLE_NAME]: {
           Keys: restaurantKeys,
-          // ConsistentRead: false, // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB) /// Necessary here? // Consistent read is used when the read is just after a writting
+          // ConsistentRead: false, // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB) /// FIXME: Necessary here? // Consistent read is used when the read is just after a writting
         }
       }
     }));
@@ -98,7 +347,7 @@ restaurantsRouter.get("/feed", async (c) => { /// Maybe it's better to move this
     // 4. STEP 3: Format output layout matching your Kotlin mobile app Data Transfer Objects
     const formattedFeed = rawRestaurants.map((res: any) => {
       const rid = res.PK.replace("REST#", "");
-      const originalDishes = res.dishesToShow || [];
+      const originalDishes = [res.dishesToShow1 || '', res.dishesToShow2 || '', res.dishesToShow3 || ''];
 
       return {
         id: rid,
@@ -406,7 +655,7 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
             expressions.push(`${dbField} = :${clientKey}`);
             
             // Ensure proper numeric cast primitives for numbers
-            if (["priceCents", "prepTime", "coordinateXInMenu", "coordinateYInMenu"].includes(clientKey)) {
+            if (["priceCents", "prepTime", "coordinateXInMenu", "coordinateYInMenu"].includes(clientKey)) { // TODO: Consider that it could be handled with "typeof"
               expressionAttributeValues[`:${clientKey}`] = Number(payloadSource[clientKey]);
             } 
             else if (clientKey === "isOutOfStock"){

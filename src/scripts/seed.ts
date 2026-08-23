@@ -145,10 +145,10 @@ async function seedData() {
         const did = crypto.randomUUID();
         const dishImageUrl = `${s3BaseUrl}/${getRandomItem(foodImageKeys)}`;
 
-        if (Math.random() < 0.2) {
+        if (dishImageUrlsToShow.length < 3) {
           dishImageUrlsToShow.push(dishImageUrl);
         }
-
+ 
         const dishName = `Special Dish ${getRandomInt(100, 999)}`;
 
         // 📝 Push Dish Resource Row
@@ -189,14 +189,15 @@ async function seedData() {
         SK: "METADATA",
         name: `Gourmet Hub ${i}`,
         logoUrl: logoImageUrl,
-        cityID: "NYC",
         latitude: -12.122,
         longitude: -77.028,
-        openTime: "08:00",
-        closeTime: "22:00",
-        dishesToShow: dishImageUrlsToShow,
-        phoneNumberToPay: randomPhoneNumber,
-        phoneNumberToContact: randomPhoneNumber,
+        // openTime: "08:00",
+        // closeTime: "22:00",
+        dishesToShowUrl1: dishImageUrlsToShow[0],
+        dishesToShowUrl2: dishImageUrlsToShow[1],
+        dishesToShowUrl3: dishImageUrlsToShow[2],
+        phoneNumberToPay: `+51${randomPhoneNumber}`,
+        phoneNumberToContact: `+51${randomPhoneNumber}`,
         paymentQrUrl: qrUrl,
       }
     }));
