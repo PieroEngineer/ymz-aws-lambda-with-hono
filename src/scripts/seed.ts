@@ -7,7 +7,7 @@ import { getS3Client, getDynamoDBClient } from "../aws/clientFactory.js";
 /// ⚙️ CONFIGURATION CONSTANTS
 const BUCKET_NAME = "restaurant-assets";
 const TABLE_NAME = "YummiziTable";
-const STATIC_USER_ID = "00000000-0000-4000-a000-000000000000";
+const MOCK_USER_ID = "00000000-0000-4000-a000-000000000000";
 const SECTIONS = ["Closest", "Popular", "FriendsFav", "Newest"];
 
 // 🔌 INITIALIZE CLIENTS USING OUR TRAVEL ADAPTER FACTORY
@@ -169,7 +169,7 @@ async function seedData() {
             description: "The most beautiful thing in a dish"
           }
         }));
-
+ 
         console.log(`✅🍽️  ${dishName} (${dishImageUrl}) mapped to page ${mIdx + 1} for restaurant: Gourmet Hub ${i}`);
       }
       console.log(`✅📇 Menu page ${mIdx + 1} (${menuImageUrl}) fully initialized.`);
@@ -209,8 +209,9 @@ async function seedData() {
     await docClient.send(new PutCommand({
       TableName: TABLE_NAME,
       Item: {
-        PK: `USER#${STATIC_USER_ID}`,
+        PK: `USER#${MOCK_USER_ID}`,
         SK: `SEC#${targetSection}#${rid}`,
+        // SK: `SEC#Popular#${rid}`,
         addedDate: new Date().toISOString(),
       }
     }));

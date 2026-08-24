@@ -3423,9 +3423,12 @@ restaurantsRouter.post("/:restaurantId/info/update", async (c) => {
 restaurantsRouter.get("/feed", async (c) => {
   try {
     const userId = c.req.query("userId");
+    console.log(`\u{1F50E}\u{1F60C}  Fetching personalized feed for User: ${userId}`);
     if (!userId) {
+      console.log(`\u{1F534}\u{1F50E}\u{1F60C} User ID was not fown: ${userId}`);
       return c.json({ error: "Missing userId" }, 400);
     }
+    console.log(`\u{1F50E}\u{1F60C} User ID was fown: ${userId}`);
     const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
     const feedLinksResponse = await docClient3.send(new QueryCommand3({
       TableName: TABLE_NAME3,
@@ -3436,18 +3439,27 @@ restaurantsRouter.get("/feed", async (c) => {
       }
     }));
     const feedLinks = feedLinksResponse.Items || [];
-    if (feedLinks.length === 0) {
-      return c.json([], 200);
-    }
+    const MOCK_USER_ID = "00000000-0000-4000-a000-000000000000";
+    const MOCK_RESTAURANT_ID = "4258e0fa-6b3c-43bc-a6d8-82c5835d608d";
+    const mockFeedLinks = [
+      {
+        PK: `USER#${MOCK_USER_ID}`,
+        SK: `SEC#Popular#${MOCK_RESTAURANT_ID}`,
+        addedDate: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    ];
+    console.log("\u{1F50E}\u{1F3EA}  Mock data\n", mockFeedLinks, "\n\u{1F3EA}  seed data\n", feedLinks);
     const restaurantKeys = [];
     const sectionMap = {};
-    for (const link of feedLinks) {
+    for (const link of mockFeedLinks) {
       const parts = link.SK.split("#");
       const sectionName = parts[1];
       const rid = parts[2];
       restaurantKeys.push({ PK: `REST#${rid}`, SK: "METADATA" });
       sectionMap[rid] = sectionName;
     }
+    console.log(`\u{1F50E}\u{1F3EA}  restaurantKeys: ${JSON.stringify(restaurantKeys, null, 2)}`);
+    console.log(`\u{1F50E}\u{1F3EA}  sectionMap: ${JSON.stringify(sectionMap, null, 2)}`);
     const batchResponse = await docClient3.send(new BatchGetCommand3({
       RequestItems: {
         [TABLE_NAME3]: {
@@ -3457,9 +3469,10 @@ restaurantsRouter.get("/feed", async (c) => {
       }
     }));
     const rawRestaurants = batchResponse.Responses?.[TABLE_NAME3] || [];
+    console.log(`\u{1F50E}\u{1F3EA}  Fetched ${rawRestaurants.length} personalized feed items ${JSON.stringify(rawRestaurants, null, 2)}`);
     const formattedFeed = rawRestaurants.map((res) => {
       const rid = res.PK.replace("REST#", "");
-      const originalDishes = [res.dishesToShow1 || "", res.dishesToShow2 || "", res.dishesToShow3 || ""];
+      const originalDishes = [res.dishesToShowUrl1 || "", res.dishesToShowUrl2 || "", res.dishesToShowUrl3 || ""];
       return {
         id: rid,
         name: res.name,
@@ -3532,6 +3545,8 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
     menuPages.sort((a, b) => a.pageNumber - b.pageNumber);
     console.log(`\u{1F50E}\u{1F4C3}  Menu info attached and mapped for Restaurant ID:
 ${rid}`);
+    console.log("\u{1F50E}  The menu menu pages are:", JSON.stringify(menuPages, null, 2));
+    console.log("\u{1F50E}  The menu dishes are:", JSON.stringify(dishes, null, 2));
     return c.json({
       menuPages,
       dishes
@@ -3663,6 +3678,7 @@ ${JSON.stringify(menuPages, null, 2)}`);
               coordinateXInMenu: dish.coordinateXInMenu,
               coordinateYInMenu: dish.coordinateYInMenu,
               description: dish.description,
+              createdAt: Date.now(),
               /**
               * 💡 HINT FOR SIGNED URL TRANSITION:
               * Strip down full path URLs to save only the relative storage object key identifiers
@@ -3682,7 +3698,9 @@ ${JSON.stringify(menuPages, null, 2)}`);
           coordinateYInMenu: "coordinateYInMenu",
           description: "description",
           isOutOfStock: "isOutOfStock",
-          imageUrl: "imageUrl"
+          imageUrl: "imageUrl",
+          createdAt: "createdAt"
+          /// Maybe it shouldn't be here because it'e never updated
         };
         const payloadSource = dish.updatedFields;
         const expressions = [];
@@ -3690,7 +3708,7 @@ ${JSON.stringify(menuPages, null, 2)}`);
         for (const [clientKey, dbField] of Object.entries(fieldMapping)) {
           if (payloadSource[clientKey] !== void 0) {
             expressions.push(`${dbField} = :${clientKey}`);
-            if (["priceCents", "prepTime", "coordinateXInMenu", "coordinateYInMenu"].includes(clientKey)) {
+            if (["priceCents", "prepTime", "coordinateXInMenu", "coordinateYInMenu", "createdAt"].includes(clientKey)) {
               expressionAttributeValues[`:${clientKey}`] = Number(payloadSource[clientKey]);
             } else if (clientKey === "isOutOfStock") {
               expressionAttributeValues[`:${clientKey}`] = Boolean(payloadSource[clientKey]);
@@ -3752,8 +3770,8 @@ restaurantsRouter.get("/:restaurantId/payment", async (c) => {
     if (!metadata) {
       return c.json({ error: "\u{1F6A9} Restaurant payment metadata not found" }, 404);
     }
-    const phoneNumberToPay = Number(metadata.phoneNumberToPay);
-    const phoneNumberToContact = Number(metadata.phoneNumberToContact);
+    const phoneNumberToPay = metadata.phoneNumberToPay;
+    const phoneNumberToContact = metadata.phoneNumberToContact;
     const paymentQrUrl = typeof metadata.paymentQrUrl === "string" ? metadata.paymentQrUrl : "";
     return c.json({
       phoneNumberToPay,

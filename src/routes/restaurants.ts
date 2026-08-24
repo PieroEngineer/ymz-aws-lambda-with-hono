@@ -460,10 +460,15 @@ restaurantsRouter.get("/feed", async (c) => { /// Maybe it's better to move this
   try {
     // 1. Get User ID from Query Params (?userId=...)
     const userId = c.req.query("userId");
+
+    console.log(`🔎😌  Fetching personalized feed for User: ${userId}`);
     
     if (!userId) {
+      console.log(`🔴🔎😌 User ID was not fown: ${userId}`);
       return c.json({ error: "Missing userId" }, 400);
     }
+
+    console.log(`🔎😌 User ID was fown: ${userId}`);
 
     // 🗺️ DYNAMIC S3 RESOLUTION: Switches seamlessly between LocalStack and AWS Cloud grids
     // const isLocal = process.env.NODE_ENV === "development" || !!process.env.LOCALSTACK_ENDPOINT;
@@ -484,15 +489,31 @@ restaurantsRouter.get("/feed", async (c) => { /// Maybe it's better to move this
 
     const feedLinks = feedLinksResponse.Items || [];
 
-    if (feedLinks.length === 0) {
-      return c.json([], 200);
-    }
+    ///
+    // if (feedLinks.length === 0) {
+    //   return c.json([], 200);
+    // }
+
+
+    // Simulating a user already created with its restaurant in section
+    const MOCK_USER_ID = '00000000-0000-4000-a000-000000000000'
+    const MOCK_RESTAURANT_ID = '4258e0fa-6b3c-43bc-a6d8-82c5835d608d'
+    const mockFeedLinks: Record<string, any>[] = [
+      {
+        PK: `USER#${MOCK_USER_ID}`,
+        SK: `SEC#Popular#${MOCK_RESTAURANT_ID}`,
+        addedDate: new Date().toISOString(),
+      }
+    ];
+
+    console.log('🔎🏪  Mock data\n', mockFeedLinks, '\n🏪  seed data\n', feedLinks);
 
     // 3. STEP 2: Hydrate keys to prep for BatchGet
     const restaurantKeys: Record<string, string>[] = [];
     const sectionMap: Record<string, string> = {}; // Remembers relationship groupings
 
-    for (const link of feedLinks) {
+    // for (const link of feedLinks) {
+    for (const link of mockFeedLinks) {
       const parts = link.SK.split("#"); // ["SEC", "Popular", "UUID"]
       const sectionName = parts[1];
       const rid = parts[2];
@@ -500,6 +521,9 @@ restaurantsRouter.get("/feed", async (c) => { /// Maybe it's better to move this
       restaurantKeys.push({ PK: `REST#${rid}`, SK: "METADATA" });
       sectionMap[rid] = sectionName;
     }
+
+    console.log(`🔎🏪  restaurantKeys: ${JSON.stringify(restaurantKeys, null, 2)}`);
+    console.log(`🔎🏪  sectionMap: ${JSON.stringify(sectionMap, null, 2)}`);
 
     // ⚡ Execute High-Speed Batch Read against DynamoDB Grid Core
     const batchResponse = await docClient.send(new BatchGetCommand({
@@ -510,13 +534,15 @@ restaurantsRouter.get("/feed", async (c) => { /// Maybe it's better to move this
         }
       }
     }));
-
+ 
     const rawRestaurants = batchResponse.Responses?.[TABLE_NAME] || [];
+
+    console.log(`🔎🏪  Fetched ${rawRestaurants.length} personalized feed items ${JSON.stringify(rawRestaurants, null, 2)}`);
 
     // 4. STEP 3: Format output layout matching your Kotlin mobile app Data Transfer Objects
     const formattedFeed = rawRestaurants.map((res: any) => {
       const rid = res.PK.replace("REST#", "");
-      const originalDishes = [res.dishesToShow1 || '', res.dishesToShow2 || '', res.dishesToShow3 || ''];
+      const originalDishes = [res.dishesToShowUrl1 || '', res.dishesToShowUrl2 || '', res.dishesToShowUrl3 || ''];
 
       return {
         id: rid,
@@ -611,6 +637,8 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
     menuPages.sort((a, b) => a.pageNumber - b.pageNumber);
 
     console.log(`🔎📃  Menu info attached and mapped for Restaurant ID:\n${rid}`);
+    console.log('🔎  The menu menu pages are:', JSON.stringify(menuPages, null, 2))
+    console.log('🔎  The menu dishes are:', JSON.stringify(dishes, null, 2))
 
     return c.json({
       menuPages,
@@ -789,6 +817,7 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
               coordinateXInMenu: dish.coordinateXInMenu,
               coordinateYInMenu: dish.coordinateYInMenu,
               description: dish.description,
+              createdAt: Date.now(),
               /**
               * 💡 HINT FOR SIGNED URL TRANSITION:
               * Strip down full path URLs to save only the relative storage object key identifiers
@@ -811,7 +840,8 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
           coordinateYInMenu: "coordinateYInMenu",
           description: "description",
           isOutOfStock: "isOutOfStock",
-          imageUrl: "imageUrl"
+          imageUrl: "imageUrl",
+          createdAt: "createdAt"  /// Maybe it shouldn't be here because it'e never updated
         };
 
         // Extract the target payload block (checks flat attributes first, falls back to an inner updatedFields map if structured that way)
@@ -826,7 +856,7 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
             expressions.push(`${dbField} = :${clientKey}`);
             
             // Ensure proper numeric cast primitives for numbers
-            if (["priceCents", "prepTime", "coordinateXInMenu", "coordinateYInMenu"].includes(clientKey)) { // TODO: Consider that it could be handled with "typeof"
+            if (["priceCents", "prepTime", "coordinateXInMenu", "coordinateYInMenu", "createdAt"].includes(clientKey)) { // TODO: Consider that it could be handled with "typeof"
               expressionAttributeValues[`:${clientKey}`] = Number(payloadSource[clientKey]);
             } 
             else if (clientKey === "isOutOfStock"){
@@ -913,8 +943,8 @@ restaurantsRouter.get("/:restaurantId/payment", async (c) => {
       return c.json({ error: "🚩 Restaurant payment metadata not found" }, 404);
     }
 
-    const phoneNumberToPay = Number(metadata.phoneNumberToPay);
-    const phoneNumberToContact = Number(metadata.phoneNumberToContact);
+    const phoneNumberToPay = metadata.phoneNumberToPay;
+    const phoneNumberToContact = metadata.phoneNumberToContact;
     const paymentQrUrl = typeof metadata.paymentQrUrl === "string" ? metadata.paymentQrUrl : "";
 
     // if ( /// Here an example of integer protection
