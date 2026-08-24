@@ -199,6 +199,8 @@ async function seedData() {
         phoneNumberToPay: `+51${randomPhoneNumber}`,
         phoneNumberToContact: `+51${randomPhoneNumber}`,
         paymentQrUrl: qrUrl,
+        isOpen: true,
+        isInitialized: true,
       }
     }));
 
