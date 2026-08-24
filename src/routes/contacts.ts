@@ -1,51 +1,19 @@
 import { Hono } from "hono";
-import { PutCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { getDynamoDBClient } from "../aws/clientFactory.js";
+import { saveFeedback, saveRestaurantContact } from "../services/contactService.js";
+import { FeedbackPayload, RestaurantContactPayload } from "../types/contacts.js";
 
 export const contactsRouter = new Hono();
 
-const TABLE_NAME = "YummiziTable";
-
-// 🔌 Wrap standard Dynamo client into Document Client for comfortable JSON mappings
-const docClient = DynamoDBDocumentClient.from(getDynamoDBClient(), {
-  marshallOptions: { removeUndefinedValues: true },
-});
-
 contactsRouter.post("/feedback", async (c) =>{
     try{
-        // 📩 Parse input payload safely from Hono context body
-        const body = await c.req.json().catch(() => ({}));
-        const userId = body.userId
-        const requestId = body.requestId
-        const conformDegree = body.conformDegree
-        const description = body.description
+        const body: FeedbackPayload = await c.req.json().catch(() => ({}));
 
-      if (!userId) {
-        return c.json({ error: "Missing userId" }, 400);
-      }
+        await saveFeedback(body)    
+        console.log('✅💽 Feedback Item saved in DynamoDB successfully');
 
-      const newFinalFeedbackItem = {
-          PK: `USER#${userId}`,
-          SK: `FEEDBACK#${crypto.randomUUID()}`,
-
-          requestId: requestId,
-          conformDegree: conformDegree,
-          description: description
-      }
-
-      console.log('💽 Feedback Item to save in DynamoDB', JSON.stringify(newFinalFeedbackItem , null, 2), '\nfor request ', requestId);
-
-      // Execute atomic database insertion (System of Record First!)
-      await docClient.send(new PutCommand({
-          TableName: TABLE_NAME,
-          Item: newFinalFeedbackItem,
-      }));
-
-      // 🎉 Success response utilizing Hono native JSON encoder
-      return c.json({
-        message: "Feedback saved successfully",
-        // realtimeNotified: ablyDispatchSuccess
-      }, 201);
+        return c.json({
+            message: "Feedback saved successfully", /// Put in an interface
+        }, 201);
 
     }
     catch (error: any) {
@@ -56,36 +24,13 @@ contactsRouter.post("/feedback", async (c) =>{
 
 contactsRouter.post("/restaurant", async (c) =>{
     try{
-        // 📩 Parse input payload safely from Hono context body
-        const body = await c.req.json().catch(() => ({}));
-        const userId = body.userId
-        const restaurantName = body.restaurantName
-        const restaurantContact = body.restaurantContact
-        const restaurantComment = body.restaurantComment
+        const body: RestaurantContactPayload = await c.req.json().catch(() => ({}));
 
-        // TODOCheck if it's empty
+        await saveRestaurantContact(body)
+        console.log('✅💽 Feedback Item saved in DynamoDB successfully');
 
-    const newFinalContactItem = {
-        PK: `USER#${userId}`,
-        SK: `RCONTACT#${crypto.randomUUID()}`,
-
-        restaurantName: restaurantName,
-        restaurantContact: restaurantContact,
-        restaurantComment: restaurantComment
-    }
-
-    console.log('💽 Contact Item to save in DynamoDB', JSON.stringify(newFinalContactItem , null, 2));
-
-    // Execute atomic database insertion (System of Record First!)
-    await docClient.send(new PutCommand({
-        TableName: TABLE_NAME,
-        Item: newFinalContactItem,
-    }));
-
-    // 🎉 Success response utilizing Hono native JSON encoder
       return c.json({
         message: "Contact saved successfully",
-        // realtimeNotified: ablyDispatchSuccess
       }, 201);
 
     }

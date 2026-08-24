@@ -2528,12 +2528,13 @@ var getDynamoDBClient = () => {
 
 // src/k.ts
 var ablyKeyWS = "4w64MA.R_FXWQ:2BlLaKwCQu5o2R6EoCt9RwNcoGNHIxOWs9pPFodpMhQ";
+var TABLE_NAME = "YummiziTable";
 
 // src/routes/requests.ts
 var docClient = DynamoDBDocumentClient.from(getDynamoDBClient(), {
   marshallOptions: { removeUndefinedValues: true }
 });
-var TABLE_NAME = "YummiziTable";
+var TABLE_NAME2 = "YummiziTable";
 var requestsRouter = new Hono2();
 requestsRouter.post("/create", async (c) => {
   try {
@@ -2565,7 +2566,7 @@ requestsRouter.post("/create", async (c) => {
     };
     console.log("\u{1F4BD}  Request Item to save in DynamoDB", JSON.stringify(newRequestItem, null, 2), "\nfor restaurant ", restaurantId);
     await docClient.send(new PutCommand({
-      TableName: TABLE_NAME,
+      TableName: TABLE_NAME2,
       Item: newRequestItem
     }));
     const clientPayload = {
@@ -2648,7 +2649,7 @@ requestsRouter.post("/:requestId/cancel", async (c) => {
     const sk = `REQ#${requestId}`;
     await docClient.send(new DeleteCommand({
       // TODO: This is temporal  code and should be alternated with the commented code that is just above
-      TableName: TABLE_NAME,
+      TableName: TABLE_NAME2,
       Key: { PK: pk, SK: sk }
     }));
     const clientPayload = {
@@ -2723,7 +2724,7 @@ requestsRouter.get("/:restaurantId", async (c) => {
       return c.json({ error: "Missing restaurantId parameter" }, 400);
     }
     const queryParams = {
-      TableName: TABLE_NAME,
+      TableName: TABLE_NAME2,
       KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
       ExpressionAttributeValues: {
         ":pk": `REST#${rid}`,
@@ -2775,7 +2776,7 @@ ${JSON.stringify(body)}`);
     const normalizedState = String(newState);
     await docClient.send(new UpdateCommand({
       // TODO: Include the updating of the acceptance's timestamp too
-      TableName: TABLE_NAME,
+      TableName: TABLE_NAME2,
       Key: { PK: pk, SK: sk },
       UpdateExpression: "SET #state = :state",
       ExpressionAttributeNames: {
@@ -2854,14 +2855,14 @@ requestsRouter.post("/active", async (c) => {
     }));
     const batchResponse = await docClient.send(new BatchGetCommand({
       RequestItems: {
-        [TABLE_NAME]: {
+        [TABLE_NAME2]: {
           Keys: formattedKeys,
           ConsistentRead: false
           // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB)
         }
       }
     }));
-    const requestItems = batchResponse.Responses?.[TABLE_NAME] || [];
+    const requestItems = batchResponse.Responses?.[TABLE_NAME2] || [];
     const mappedPayloads = requestItems.map((item) => {
       const requestId = item.SK.replace("REQ#", "");
       return {
@@ -2922,7 +2923,7 @@ var s3Client = getS3Client();
 var docClient2 = DynamoDBDocumentClient2.from(getDynamoDBClient(), {
   marshallOptions: { removeUndefinedValues: true }
 });
-var TABLE_NAME2 = "YummiziTable";
+var TABLE_NAME3 = "YummiziTable";
 var BUCKET_NAME = "restaurant-assets";
 paymentsRouter.post("/confirm", async (c) => {
   const body = await c.req.json().catch(() => ({}));
@@ -2943,7 +2944,7 @@ paymentsRouter.post("/confirm", async (c) => {
   const command = new BatchGetCommand2({
     /// Analyze if a transaction is more proper for this situation
     RequestItems: {
-      [TABLE_NAME2]: {
+      [TABLE_NAME3]: {
         Keys: keys,
         ConsistentRead: false,
         // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB)
@@ -2953,7 +2954,7 @@ paymentsRouter.post("/confirm", async (c) => {
     }
   });
   const response = await docClient2.send(command);
-  const dishItems = response.Responses?.[TABLE_NAME2] || [];
+  const dishItems = response.Responses?.[TABLE_NAME3] || [];
   const totalCostInCents = calculateTotalCost(orderSelections, dishItems);
   const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`;
   const s3Key = `menus/${restaurantId}/${requestId}.webp`;
@@ -2995,7 +2996,7 @@ paymentsRouter.post("/confirm", async (c) => {
   console.log("\u{1F4BD}  Order to save in DynamoDB", JSON.stringify(paymentPreselectionItem, null, 2), "\nfor restaurant ", restaurantId);
   try {
     await docClient2.send(new PutCommand2({
-      TableName: TABLE_NAME2,
+      TableName: TABLE_NAME3,
       Item: paymentPreselectionItem
     }));
     const clientPayload = {
@@ -3063,7 +3064,7 @@ paymentsRouter.get("/:restaurantId", async (c) => {
       return c.json({ error: "Missing restaurantId parameter" }, 400);
     }
     const queryParams = {
-      TableName: TABLE_NAME2,
+      TableName: TABLE_NAME3,
       KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
       ExpressionAttributeValues: {
         ":pk": `REST#${rid}`,
@@ -3102,7 +3103,7 @@ var s3Client2 = getS3Client();
 var docClient3 = DynamoDBDocumentClient3.from(getDynamoDBClient(), {
   marshallOptions: { removeUndefinedValues: true }
 });
-var TABLE_NAME3 = "YummiziTable";
+var TABLE_NAME4 = "YummiziTable";
 var BUCKET_NAME2 = "restaurant-assets";
 var restaurantsRouter = new Hono2();
 restaurantsRouter.post("/:restaurantId/info/initialize", async (c) => {
@@ -3199,7 +3200,7 @@ restaurantsRouter.post("/:restaurantId/info/initialize", async (c) => {
 `, JSON.stringify(dataToUpload, null, 2));
     await docClient3.send(
       new PutCommand3({
-        TableName: TABLE_NAME3,
+        TableName: TABLE_NAME4,
         Item: {
           PK: `REST#${restaurantId}`,
           SK: "METADATA",
@@ -3227,7 +3228,7 @@ restaurantsRouter.get("/:restaurantId/info", async (c) => {
     }
     const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
     const command = new GetCommand({
-      TableName: TABLE_NAME3,
+      TableName: TABLE_NAME4,
       Key: {
         PK: `REST#${restaurantId}`,
         SK: "METADATA"
@@ -3399,7 +3400,7 @@ restaurantsRouter.post("/:restaurantId/info/update", async (c) => {
     });
     if (updateExpressions.length > 0) {
       await docClient3.send(new UpdateCommand2({
-        TableName: TABLE_NAME3,
+        TableName: TABLE_NAME4,
         Key: {
           PK: `REST#${restaurantId}`,
           SK: "METADATA"
@@ -3431,7 +3432,7 @@ restaurantsRouter.get("/feed", async (c) => {
     console.log(`\u{1F50E}\u{1F60C} User ID was fown: ${userId}`);
     const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
     const feedLinksResponse = await docClient3.send(new QueryCommand3({
-      TableName: TABLE_NAME3,
+      TableName: TABLE_NAME4,
       KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
       ExpressionAttributeValues: {
         ":pk": `USER#${userId}`,
@@ -3462,13 +3463,13 @@ restaurantsRouter.get("/feed", async (c) => {
     console.log(`\u{1F50E}\u{1F3EA}  sectionMap: ${JSON.stringify(sectionMap, null, 2)}`);
     const batchResponse = await docClient3.send(new BatchGetCommand3({
       RequestItems: {
-        [TABLE_NAME3]: {
+        [TABLE_NAME4]: {
           Keys: restaurantKeys
           // ConsistentRead: false, // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB) /// FIXME: Necessary here? // Consistent read is used when the read is just after a writting
         }
       }
     }));
-    const rawRestaurants = batchResponse.Responses?.[TABLE_NAME3] || [];
+    const rawRestaurants = batchResponse.Responses?.[TABLE_NAME4] || [];
     console.log(`\u{1F50E}\u{1F3EA}  Fetched ${rawRestaurants.length} personalized feed items ${JSON.stringify(rawRestaurants, null, 2)}`);
     const formattedFeed = rawRestaurants.map((res) => {
       const rid = res.PK.replace("REST#", "");
@@ -3502,7 +3503,7 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
     }
     const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
     const response = await docClient3.send(new QueryCommand3({
-      TableName: TABLE_NAME3,
+      TableName: TABLE_NAME4,
       KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
       ExpressionAttributeValues: {
         ":pk": `REST#${rid}`,
@@ -3578,7 +3579,7 @@ ${JSON.stringify(menuPages, null, 2)}`);
       if (action === "delete") {
         transactionItems.push({
           Delete: {
-            TableName: TABLE_NAME3,
+            TableName: TABLE_NAME4,
             Key: { PK: `REST#${rid}`, SK: sk }
           }
         });
@@ -3607,7 +3608,7 @@ ${JSON.stringify(menuPages, null, 2)}`);
         if (action === "save") {
           transactionItems.push({
             Put: {
-              TableName: TABLE_NAME3,
+              TableName: TABLE_NAME4,
               Item: {
                 PK: `REST#${rid}`,
                 SK: sk,
@@ -3641,7 +3642,7 @@ ${JSON.stringify(menuPages, null, 2)}`);
           if (expressions.length > 0) {
             transactionItems.push({
               Update: {
-                TableName: TABLE_NAME3,
+                TableName: TABLE_NAME4,
                 Key: { PK: `REST#${rid}`, SK: sk },
                 UpdateExpression: `SET ${expressions.join(", ")}`,
                 ExpressionAttributeValues: expressionAttributeValues
@@ -3658,14 +3659,14 @@ ${JSON.stringify(menuPages, null, 2)}`);
       if (action === "delete") {
         transactionItems.push({
           Delete: {
-            TableName: TABLE_NAME3,
+            TableName: TABLE_NAME4,
             Key: { PK: `REST#${rid}`, SK: sk }
           }
         });
       } else if (action === "save") {
         transactionItems.push({
           Put: {
-            TableName: TABLE_NAME3,
+            TableName: TABLE_NAME4,
             Item: {
               // Shape of what is going to be sent
               PK: `REST#${rid}`,
@@ -3720,7 +3721,7 @@ ${JSON.stringify(menuPages, null, 2)}`);
         if (expressions.length > 0) {
           transactionItems.push({
             Update: {
-              TableName: TABLE_NAME3,
+              TableName: TABLE_NAME4,
               Key: { PK: `REST#${rid}`, SK: sk },
               UpdateExpression: `SET ${expressions.join(", ")}`,
               ExpressionAttributeValues: expressionAttributeValues
@@ -3758,7 +3759,7 @@ restaurantsRouter.get("/:restaurantId/payment", async (c) => {
       return c.json({ error: "restaurantId is required" }, 400);
     }
     const response = await docClient3.send(new GetCommand({
-      TableName: TABLE_NAME3,
+      TableName: TABLE_NAME4,
       Key: {
         PK: `REST#${rid}`,
         SK: "METADATA"
@@ -3789,7 +3790,7 @@ import { PutCommand as PutCommand4, DeleteCommand as DeleteCommand2, DynamoDBDoc
 var docClient4 = DynamoDBDocumentClient4.from(getDynamoDBClient(), {
   marshallOptions: { removeUndefinedValues: true }
 });
-var TABLE_NAME4 = "YummiziTable";
+var TABLE_NAME5 = "YummiziTable";
 var usersRouter = new Hono2();
 usersRouter.put("/:userId/preferences/:prefId", async (c) => {
   try {
@@ -3814,7 +3815,7 @@ usersRouter.put("/:userId/preferences/:prefId", async (c) => {
       // Maps Kotlin Long timestamp cleanly
     };
     await docClient4.send(new PutCommand4({
-      TableName: TABLE_NAME4,
+      TableName: TABLE_NAME5,
       Item: preferenceItem
     }));
     console.log(`\u2705\u{1F64B} The preference ${pref_id} for user ${user_id} was successfully added`);
@@ -3834,7 +3835,7 @@ usersRouter.delete("/:userId/preferences/:prefId", async (c) => {
     const pk = `USER#${user_id}`;
     const sk = `PREF#${pref_id}`;
     await docClient4.send(new DeleteCommand2({
-      TableName: TABLE_NAME4,
+      TableName: TABLE_NAME5,
       Key: { PK: pk, SK: sk }
     }));
     console.log(`\u2705\u{1F5D1}\uFE0F The preference ${pref_id} of user ${user_id} was successfully deleted`);
@@ -3845,38 +3846,66 @@ usersRouter.delete("/:userId/preferences/:prefId", async (c) => {
   }
 });
 
-// src/routes/contacts.ts
-import { PutCommand as PutCommand5, DynamoDBDocumentClient as DynamoDBDocumentClient5 } from "@aws-sdk/lib-dynamodb";
-var contactsRouter = new Hono2();
-var TABLE_NAME5 = "YummiziTable";
-var docClient5 = DynamoDBDocumentClient5.from(getDynamoDBClient(), {
+// src/repositories/contactRepository.ts
+import { PutCommand as PutCommand5 } from "@aws-sdk/lib-dynamodb";
+
+// src/docClient.ts
+import { DynamoDBDocumentClient as DynamoDBDocumentClient5 } from "@aws-sdk/lib-dynamodb";
+var rawDynamo = getDynamoDBClient();
+var docClient5 = DynamoDBDocumentClient5.from(rawDynamo, {
   marshallOptions: { removeUndefinedValues: true }
 });
+
+// src/repositories/contactRepository.ts
+async function putFeedback(FeedbackPayload) {
+  const newFeedbackItem = {
+    PK: `USER#${FeedbackPayload.userId}`,
+    SK: `FEEDBACK#${crypto.randomUUID()}`,
+    requestId: FeedbackPayload.requestId,
+    conformDegree: FeedbackPayload.conformDegree,
+    description: FeedbackPayload.description
+  };
+  await docClient5.send(new PutCommand5({
+    TableName: TABLE_NAME,
+    Item: newFeedbackItem
+  }));
+}
+async function putRestaurantContact(restaurantContactPayload) {
+  const newFinalContactItem = {
+    PK: `USER#${restaurantContactPayload.userId}`,
+    SK: `RCONTACT#${crypto.randomUUID()}`,
+    restaurantName: restaurantContactPayload.restaurantName,
+    restaurantContact: restaurantContactPayload.restaurantContact,
+    restaurantComment: restaurantContactPayload.restaurantComment
+  };
+  console.log("\u{1F4BD} Contact Item to save in DynamoDB", JSON.stringify(newFinalContactItem, null, 2));
+  await docClient5.send(new PutCommand5({
+    TableName: TABLE_NAME,
+    Item: newFinalContactItem
+  }));
+}
+
+// src/services/contactService.ts
+async function saveFeedback(body) {
+  if (!body.userId) {
+    throw new Error("Missing userId");
+  }
+  await putFeedback(body);
+}
+async function saveRestaurantContact(body) {
+  await putRestaurantContact(body);
+}
+
+// src/routes/contacts.ts
+var contactsRouter = new Hono2();
 contactsRouter.post("/feedback", async (c) => {
   try {
     const body = await c.req.json().catch(() => ({}));
-    const userId = body.userId;
-    const requestId = body.requestId;
-    const conformDegree = body.conformDegree;
-    const description = body.description;
-    if (!userId) {
-      return c.json({ error: "Missing userId" }, 400);
-    }
-    const newFinalFeedbackItem = {
-      PK: `USER#${userId}`,
-      SK: `FEEDBACK#${crypto.randomUUID()}`,
-      requestId,
-      conformDegree,
-      description
-    };
-    console.log("\u{1F4BD} Feedback Item to save in DynamoDB", JSON.stringify(newFinalFeedbackItem, null, 2), "\nfor request ", requestId);
-    await docClient5.send(new PutCommand5({
-      TableName: TABLE_NAME5,
-      Item: newFinalFeedbackItem
-    }));
+    await saveFeedback(body);
+    console.log("\u2705\u{1F4BD} Feedback Item saved in DynamoDB successfully");
     return c.json({
       message: "Feedback saved successfully"
-      // realtimeNotified: ablyDispatchSuccess
+      /// Put in an interface
     }, 201);
   } catch (error) {
     console.error(`\u{1F6A8} SAVE FEEDBACK ERROR: ${error.message}`);
@@ -3886,25 +3915,10 @@ contactsRouter.post("/feedback", async (c) => {
 contactsRouter.post("/restaurant", async (c) => {
   try {
     const body = await c.req.json().catch(() => ({}));
-    const userId = body.userId;
-    const restaurantName = body.restaurantName;
-    const restaurantContact = body.restaurantContact;
-    const restaurantComment = body.restaurantComment;
-    const newFinalContactItem = {
-      PK: `USER#${userId}`,
-      SK: `RCONTACT#${crypto.randomUUID()}`,
-      restaurantName,
-      restaurantContact,
-      restaurantComment
-    };
-    console.log("\u{1F4BD} Contact Item to save in DynamoDB", JSON.stringify(newFinalContactItem, null, 2));
-    await docClient5.send(new PutCommand5({
-      TableName: TABLE_NAME5,
-      Item: newFinalContactItem
-    }));
+    await saveRestaurantContact(body);
+    console.log("\u2705\u{1F4BD} Feedback Item saved in DynamoDB successfully");
     return c.json({
       message: "Contact saved successfully"
-      // realtimeNotified: ablyDispatchSuccess
     }, 201);
   } catch (error) {
     console.error(`\u{1F6A8} SAVE CONTACT ERROR: ${error.message}`);
@@ -3921,6 +3935,7 @@ app.use(
     // Dynamically allows any local port (3000, 5173, etc.)
     allowHeaders: ["Content-Type", "Authorization"],
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    // TODO: Should I include "PATCH"?
     exposeHeaders: ["Content-Length"],
     maxAge: 600,
     credentials: true

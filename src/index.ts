@@ -17,7 +17,7 @@ app.use(
   cors({
     origin: (origin) => (origin.includes("localhost") ? origin : null), // Dynamically allows any local port (3000, 5173, etc.)
     allowHeaders: ["Content-Type", "Authorization"],
-    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],  // TODO: Should I include "PATCH"?
     exposeHeaders: ["Content-Length"],
     maxAge: 600,
     credentials: true,

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { getDynamoDBClient, getS3Client } from "../aws/clientFactory.js";
 import { QueryCommand, PutCommand, DynamoDBDocumentClient, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
 import { ablyKeyWS } from "../k.js";
-import { OrderItemPayload } from "../types/orderTypes.js";
+import { OrderItemPayload } from "../types/orders.js";
 import { calculateTotalCost } from "../services/paymentService.js"
 import { PutObjectCommand } from "@aws-sdk/client-s3"; // 📦 Native S3 actions
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"; // 🔑 Presign signing engines

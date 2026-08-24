@@ -4,7 +4,7 @@ import { getDynamoDBClient, getS3Client } from "../aws/clientFactory.js";
 import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { PutObjectCommand } from "@aws-sdk/client-s3"; // 📦 Native S3 actions
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"; // 🔑 Presign signing engines
-import { RestaurantDataToUpdate } from "../types/restaurantTypes.js";
+import { RestaurantDataToUpdate } from "../types/restaurants.js";
 
 // Initialize the S3 Client engine instance
 const s3Client = getS3Client();

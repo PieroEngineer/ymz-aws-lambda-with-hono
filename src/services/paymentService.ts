@@ -1,4 +1,4 @@
-import { OrderItemPayload } from "../types/orderTypes";
+import { OrderItemPayload } from "../types/orders";
 
 /**
  * Calculates total cost in cents with O(N + M) time complexity.

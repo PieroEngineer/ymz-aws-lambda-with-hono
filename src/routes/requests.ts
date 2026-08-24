@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { QueryCommand, PutCommand, UpdateCommand, DynamoDBDocumentClient, DeleteCommand, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
 import { getDynamoDBClient } from "../aws/clientFactory.js";
 import { ablyKeyWS } from "../k.js";
-import { RequestIdentificatorsPayload } from "../types/requestTypes.js";
+import { RequestIdentificatorsPayload } from "../types/requests.js";
 
 // 🔌 Wrap standard Dynamo client into Document Client for comfortable JSON mappings
 const docClient = DynamoDBDocumentClient.from(getDynamoDBClient(), {
