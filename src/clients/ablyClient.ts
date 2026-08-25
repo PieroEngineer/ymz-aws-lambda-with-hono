@@ -1,0 +1,52 @@
+import { ablyKeyWS } from "../k";
+
+
+export async function transmitViaAbly( channelName: string, eventName: string, dataPayload:  any, maxAttempts = 3 ){    /// Would it be a bad practice to pass the type as argument?
+
+    if (!ablyKeyWS) {
+        throw new Error("ABLY_API_KEY is not defined");
+    }
+
+    const [username, password] = ablyKeyWS.split(':');
+    const credentials = btoa(`${username}:${password}`);
+
+    const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`
+
+    // We can extract this to an inline execution workflow
+    let ablyDispatchSuccess = false;
+    let attempts = 0;
+
+    while (!ablyDispatchSuccess && attempts < maxAttempts) {  /// It would look better if this part is saved within a helper
+        try {
+        attempts++;
+        const ablyResponse = await fetch(ablyEndpoint, {
+            method: 'POST',
+            headers: {
+            'Authorization': `Basic ${credentials}`,
+            'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+            name: eventName,   // The targeted subscriber frequency path matching mock constraints
+            data: dataPayload   // The exact TableRequestPayload DTO shape your staff app consumes
+            })
+        });
+
+        if (ablyResponse.ok) {
+            ablyDispatchSuccess = true;
+            console.log(`📡 [Attempt ${attempts}] Successfully order preselection event to Ably channel: ${channelName}`);
+            console.log(`📦  Order to send: ${JSON.stringify({name: eventName, data: dataPayload}, null, 2)}`);
+            
+        } else {
+            console.warn(`⚠️ [Attempt ${attempts}] Mock Ably returned a status error code: ${ablyResponse.status}`);
+        }
+        } catch (netErr: any) {
+        console.warn(`⚠️ [Attempt ${attempts}] Network failure transmitting data payload to mock Ably server: ${netErr.message}`);
+        }
+    }
+
+    // Logging total failure fallback trace benchmarks if the mock server is down entirely
+    if (!ablyDispatchSuccess) {
+        console.error(`🚨 CRITICAL: Failed to stream real-time broadcast alert data past ${maxAttempts} attempts. Database state remains fully valid.`);
+    }
+
+}

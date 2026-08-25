@@ -4,11 +4,11 @@
 
 // --- Input types ---
 
-export interface OrderItemPayload{
+export interface OrderItemPayload{ 
   dishId: string
   dishName: string,
   quantity: number
-  historicalUnitPriceInCents: number
+  historicalUnitPriceInCents: number /// Necessary?
 }
 
 
