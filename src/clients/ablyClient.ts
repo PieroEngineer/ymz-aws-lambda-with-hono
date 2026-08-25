@@ -49,4 +49,5 @@ export async function transmitViaAbly( channelName: string, eventName: string, d
         console.error(`🚨 CRITICAL: Failed to stream real-time broadcast alert data past ${maxAttempts} attempts. Database state remains fully valid.`);
     }
 
+    return ablyDispatchSuccess;
 }
