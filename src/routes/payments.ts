@@ -1,25 +1,9 @@
 import { Hono } from "hono";
-import { QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { calculateTotalCost, obtainAllOrders, obtainPaymentPresignedUrl, obtainSpecificDishesData, saveConfirmationEvent, transmitConfirmationToRestaurant } from "../services/paymentService.js"
 import { ConfirmedOrder, dishPrice, PaymentConfirmationPayload, PaymentConfirmationResponse } from "../types/payments.js";
 import { PresignedUrls } from "../types/s3Clients.js";
-import { bodyLimit } from "hono/body-limit";
 
 export const paymentsRouter = new Hono(); // TODO: Rename this feature from "payment" to "order"
-
-
-//X
-// export interface PaymentImageReferencesPayload {  // TODO: Move to interfaces
-//   uploadUrl: string; // Temporary token URL for client PUT request
-//   publicUrl: string; // The permanent public read URL saved in DB
-// }
-
-//X
-// // 🔌 Wrap standard Dynamo client into Document Client for comfortable JSON mappings
-// const s3Client = getS3Client();
-// export const docClient = DynamoDBDocumentClient.from(getDynamoDBClient(), {
-//   marshallOptions: { removeUndefinedValues: true },
-// });
 
 export const TABLE_NAME = "YummiziTable";
 

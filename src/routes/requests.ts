@@ -2,14 +2,15 @@ import { Hono } from "hono";
 import { QueryCommand, PutCommand, UpdateCommand, DynamoDBDocumentClient, DeleteCommand, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
 import { getDynamoDBClient } from "../aws/clientFactory.js";
 import { ablyKeyWS } from "../k.js";
-import { RequestIdentificatorsPayload } from "../types/requests.js";
+import { RequestIdentificatorsPayload, RequestPayload } from "../types/requests.js";
+import { saveRequest } from "../services/requestService.js";
 
 // 🔌 Wrap standard Dynamo client into Document Client for comfortable JSON mappings
-const docClient = DynamoDBDocumentClient.from(getDynamoDBClient(), {
-  marshallOptions: { removeUndefinedValues: true },
-});
+// const docClient = DynamoDBDocumentClient.from(getDynamoDBClient(), {
+//   marshallOptions: { removeUndefinedValues: true },
+// });
 
-const TABLE_NAME = "YummiziTable";
+// const TABLE_NAME = "YummiziTable";
 
 // 📦 Create an isolated, modular sub-router for /requests routes
 export const requestsRouter = new Hono();
@@ -21,17 +22,24 @@ export const requestsRouter = new Hono();
 requestsRouter.post("/create", async (c) => {
   try {
     // 📩 Parse input payload safely from Hono context body
-    const body = await c.req.json().catch(() => ({}));
+    const body: RequestPayload = await c.req.json().catch(() => ({}));
+
+
     const restaurantId = body.restaurantId;
+
+
     const userId = body.userId;
     const requestId = body.requestId;   // TODO: It should be created in here, not in client
     const groupSize = body.groupSize;        
     const userName = body.userName;      
     const arrivalTime = body.arrivalTime;      
 
-    if (!restaurantId || !userId || !requestId) {
+
+
+    if (!body.restaurantId || !body.userId || !body.requestId) {
       return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
     }
+
 
     const requestTime =  Date.now()
 
@@ -43,6 +51,8 @@ requestsRouter.post("/create", async (c) => {
     //   }
 
     // TODO: Verify here that the arrival time is less than 20 minutes (or a small time that the restaurant set)
+
+    
 
     // Base info
     const baseRequestInfo = {
@@ -71,13 +81,14 @@ requestsRouter.post("/create", async (c) => {
       Item: newRequestItem,
     }));
 
+    await saveRequest(body)
+
     // CONSTRUCT TARGET CLIENT INTERFACE PAYLOAD ("TableRequestPayload" shape)  
     const clientPayload = {
       requestId: requestId,
 
       ...baseRequestInfo
     };
-
 
     const apiKey = ablyKeyWS;
 

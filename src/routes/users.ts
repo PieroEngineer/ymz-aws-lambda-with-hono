@@ -1,13 +1,6 @@
 import { Hono } from "hono";
-import { PutCommand, DeleteCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { getDynamoDBClient } from "../aws/clientFactory.js";
-
-// 🔌 Wrap standard client for clean, automated JSON marshalling
-const docClient = DynamoDBDocumentClient.from(getDynamoDBClient(), {
-  marshallOptions: { removeUndefinedValues: true },
-});
-
-const TABLE_NAME = "YummiziTable";
+import { deleteUserPreference, saveUserPreference } from "../services/userService.js";
+import { PreferencePayload } from "../types/users.js";
 
 // 📦 Create an isolated, modular sub-router for /users routes
 export const usersRouter = new Hono();
@@ -27,36 +20,9 @@ usersRouter.put("/:userId/preferences/:prefId", async (c) => {
     }
 
     // 📩 Parse input payload safely from Hono context body
-    const body = await c.req.json().catch(() => ({}));
+    const body: PreferencePayload = await c.req.json().catch(() => ({}));
 
-    const pk = `USER#${user_id}`;
-    const sk = `PREF#${pref_id}`;
-
-    // 📝 Prepare the single-table item schema matching Kotlin data models
-    const preferenceItem = {
-      PK: pk,
-      SK: sk,
-      userId: user_id, // Redundant but useful for GSIs later
-      prefId: pref_id,
-      title: body.title,
-      description: body.description,
-      color: body.color,
-      createdAt: body.createdAt ? Number(body.createdAt) : undefined // Maps Kotlin Long timestamp cleanly
-    };
-
-    /**
-     * 💡 HINT FOR FUTURE SECURITY/VALIDATION TODO FIX:
-     * If you want to enable the validation logic later, you can uncomment this validation guard block:
-     * if (!preferenceItem.title || !preferenceItem.color) {
-     * return c.json({ error: "Title and Color are required" }, 400);
-     * }
-     */
-
-    // ⚡ Execute Atomic Upsert (replaces entire object block if matching keys are targeted)
-    await docClient.send(new PutCommand({
-      TableName: TABLE_NAME,
-      Item: preferenceItem
-    }));
+    await saveUserPreference(user_id, pref_id, body);
 
     console.log(`✅🙋 The preference ${pref_id} for user ${user_id} was successfully added`);
     return c.json({ message: "Preference saved successfully" }, 200);
@@ -80,14 +46,7 @@ usersRouter.delete("/:userId/preferences/:prefId", async (c) => {
       return c.json({ error: "Missing userId or prefId in path" }, 400);
     }
 
-    const pk = `USER#${user_id}`;
-    const sk = `PREF#${pref_id}`;
-
-    // ⚡ Execute atomic delete operation against targeted key coordinate
-    await docClient.send(new DeleteCommand({
-      TableName: TABLE_NAME,
-      Key: { PK: pk, SK: sk }
-    }));
+    await deleteUserPreference(user_id, pref_id);
 
     console.log(`✅🗑️ The preference ${pref_id} of user ${user_id} was successfully deleted`);
     
