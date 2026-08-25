@@ -68,9 +68,7 @@ export interface ActiveRequestsResponse {
 
 // --- Repository types ---
 
-export interface RequestItem {
-    PK: string
-    SK: string
+export interface RequestItemData {
     userId: string
     userName: string
     groupSize: number
@@ -78,6 +76,11 @@ export interface RequestItem {
     state: string
     specifics: string[]
     arrivlaTime: number
+}
+
+export interface RequestItem extends RequestItemData {
+    PK: string
+    SK: string
 }
 
 // --- Internal types ---

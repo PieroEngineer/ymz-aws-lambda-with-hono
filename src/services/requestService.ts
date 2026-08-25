@@ -35,15 +35,7 @@ export async function saveRequest(requestPayload: RequestPayload) {
         arrivlaTime: requestPayload.arrivalTime
     };
 
-    // Match exact original structure for Database Ledger
-    const newRequestItem = {
-        PK: `REST#${requestPayload.restaurantId}`,
-        SK: `REQ#${requestPayload.requestId}`,
-
-        ...baseRequestInfo
-    };
-
-    await putRequest(newRequestItem);
+    await putRequest(requestPayload.restaurantId, requestPayload.requestId, baseRequestInfo);
 
     return baseRequestInfo;
 }

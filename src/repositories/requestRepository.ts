@@ -1,10 +1,16 @@
 import { BatchGetCommand, DeleteCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../docClient";
 import { TABLE_NAME } from "../k";
-import { RequestIdentificatorsPayload, RequestItem } from "../types/requests";
+import { RequestIdentificatorsPayload, RequestItem, RequestItemData } from "../types/requests";
 
-export async function putRequest(newRequestItem: RequestItem) {
-    console.log('💽  Request Item to save in DynamoDB', JSON.stringify(newRequestItem , null, 2), '\nfor restaurant ', newRequestItem.PK.replace('REST#', ''));
+export async function putRequest(restaurantId: string, requestId: string, requestData: RequestItemData) {
+    const newRequestItem: RequestItem = {
+        PK: `REST#${restaurantId}`,
+        SK: `REQ#${requestId}`,
+        ...requestData,
+    };
+
+    console.log('💽  Request Item to save in DynamoDB', JSON.stringify(newRequestItem , null, 2), '\nfor restaurant ', restaurantId);
 
     // Execute atomic database insertion (System of Record First!)
     await docClient.send(new PutCommand({
