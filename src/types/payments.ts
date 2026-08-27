@@ -14,6 +14,11 @@ export interface PaymentConfirmationPayload {
     orderSelections: OrderItemPayload[]
 }
 
+export interface FinalizeOrderPayload{
+  orderId: string,
+  restaurantId: string
+}
+
 // --- Output types ---
 export interface PaymentConfirmationResponse{
     message: string
@@ -46,6 +51,9 @@ export interface dishPricesDbResponse {
 export type ConfirmedOrderItem = Omit<Order, 'requestId'> & {
     PK: string;
     SK: string;
+
+    GSIPK: string;
+    GSISK: string;
 }
 
 // --- Internal types ---

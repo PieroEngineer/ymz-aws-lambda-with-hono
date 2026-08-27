@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import { calculateTotalCost, obtainAllOrders, obtainPaymentPresignedUrl, obtainSpecificDishesData, saveConfirmedOrder as saveConfirmedOrder, transmitConfirmationToRestaurant } from "../services/paymentService.js"
-import { ConfirmedOrder, dishPrice, PaymentConfirmationPayload, PaymentConfirmationResponse } from "../types/payments.js";
+import { calculateTotalCost, finalizeOrder, obtainAllActiveOrders, obtainPaymentPresignedUrl, obtainSpecificDishesData, saveConfirmedOrder as saveConfirmedOrder, transmitConfirmationToRestaurant } from "../services/paymentService.js"
+import { ConfirmedOrder, dishPrice, FinalizeOrderPayload, PaymentConfirmationPayload, PaymentConfirmationResponse } from "../types/payments.js";
 import { PresignedUrls } from "../types/s3Clients.js";
 
 export const paymentsRouter = new Hono(); // TODO: Rename this feature from "payment" to "order"
@@ -75,7 +75,9 @@ paymentsRouter.get("/:restaurantId", async (c) => {
       return c.json({ error: "Missing restaurantId parameter" }, 400);
     }
 
-   const mappedPayloads = await obtainAllOrders(rid)
+   const mappedPayloads = await obtainAllActiveOrders(rid)
+   console.log(`🔎🔎  Mapped payloads for restaurantId: ${rid}: ${JSON.stringify(mappedPayloads)}`);
+   console.log(`✅  Fetched active orders for restaurantId: ${rid}`);
 
     return c.json(mappedPayloads, 200);
   } catch (error: any) {
@@ -84,3 +86,21 @@ paymentsRouter.get("/:restaurantId", async (c) => {
   }
 });
 
+
+
+paymentsRouter.post("/finalize", async (c) => {
+  try{
+    const body: FinalizeOrderPayload = await c.req.json().catch(() => ({}));  /// What of these IDs go in the URL?  /// Should I include it inside the try that is bellow?
+
+    // TODO: Ensure that the time of arrival happened. So the restaurant doesn't finalize it before the customer arrives.
+
+    await finalizeOrder(body.restaurantId, body.orderId)
+    console.log(`✅  Order finalized for restaurantId: ${body.restaurantId}, orderId: ${body.orderId}`);
+
+    return c.json({ message: "Order finalized successfully" }, 200);
+  } catch (e: any) {
+    console.error(`🚨 FINALIZE ORDER ERROR: ${e.message}`);
+    return c.json({ error: e.message || "Internal Server Error" }, 500);
+  }
+
+})

@@ -2,6 +2,7 @@
 
 # 1. Configuration Constants
 TABLE_NAME="YummiziTable"
+GSI_TABLE_NAME="YummiziGsiTable"
 BUCKET_NAME="restaurant-assets"
 REGION="us-east-1"
 STAGE="prod"
@@ -11,15 +12,30 @@ LAMBDA_NAME="YummiziHonoBackend"
 echo "🏗️  Starting Single-Table & REST API Proxy Construction (Free Tier Compliant)..."
 
 # 2. Infrastructure: DynamoDB & S3 Creation
-echo "📦 Creating DynamoDB Single-Table..."
+echo "📦 Creating DynamoDB Single-Table and the GSI table..."
 awslocal dynamodb create-table \
     --table-name $TABLE_NAME \
     --attribute-definitions \
         AttributeName=PK,AttributeType=S \
         AttributeName=SK,AttributeType=S \
+        AttributeName=GSIPK,AttributeType=S \
+        AttributeName=GSISK,AttributeType=S \
     --key-schema \
         AttributeName=PK,KeyType=HASH \
         AttributeName=SK,KeyType=RANGE \
+    --global-secondary-indexes \
+        "[
+            {
+                \"IndexName\": \"$GSI_TABLE_NAME\",
+                \"KeySchema\": [
+                    {\"AttributeName\":\"GSIPK\",\"KeyType\":\"HASH\"},
+                    {\"AttributeName\":\"GSISK\",\"KeyType\":\"RANGE\"}
+                ],
+                \"Projection\": {
+                    \"ProjectionType\": \"ALL\"
+                }
+            }
+        ]" \
     --billing-mode PAY_PER_REQUEST \
     --region $REGION
 

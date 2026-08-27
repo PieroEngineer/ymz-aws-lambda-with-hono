@@ -1,18 +1,19 @@
 import { docClient } from "../docClient";
-import { TABLE_NAME } from "../k";
+import { GSI_TABLE_NAME, TABLE_NAME } from "../k";
 import { OrderItemPayload } from "../types/orders";
 import { ConfirmedOrder, ConfirmedOrderItem, dishPrice, dishPricesDbResponse, Order, PaymentConfirmationPayload } from "../types/payments";
-import { BatchGetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { BatchGetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 
 
-export async function getAllOrders( restaurantId: string ): Promise<Order[]> {
+export async function getAllActiveOrders( restaurantId: string ): Promise<Order[]> {
 
     const queryParams = {
       TableName: TABLE_NAME,
-      KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+      IndexName: GSI_TABLE_NAME, 
+      KeyConditionExpression: "GSIPK = :pk AND begins_with(GSISK, :skPrefix)",
       ExpressionAttributeValues: {
         ":pk": `REST#${restaurantId}`,
-        ":skPrefix": "ORDER#",
+        ":skPrefix": "ORDER#ACTIVE#",
       },
     }
 
@@ -21,6 +22,7 @@ export async function getAllOrders( restaurantId: string ): Promise<Order[]> {
 
     const mappedOrders = rawItems.map((item) => {
         const requestId = item.SK.replace("ORDER#", "");
+        // or  const requestId = item.GSISK.replace("ORDER#ACTIVE#", "");
 
         const order: Order = {
             requestId,
@@ -40,6 +42,8 @@ export async function getAllOrders( restaurantId: string ): Promise<Order[]> {
 
     return mappedOrders
 }
+
+
 
 export async function getSpecificDishesData( orderSelections: OrderItemPayload[], restaurantId: string ): Promise<dishPrice[]>{
     // Map your SKs into the required DynamoDB key structure
@@ -78,6 +82,8 @@ export async function getSpecificDishesData( orderSelections: OrderItemPayload[]
 
 }
 
+
+
 export async function putConfirmedOrder( confirmationEvent: ConfirmedOrder ){
 
     const {restaurantId, requestId, ...data} = confirmationEvent
@@ -86,6 +92,9 @@ export async function putConfirmedOrder( confirmationEvent: ConfirmedOrder ){
         PK: `REST#${restaurantId}`,
         SK: `ORDER#${requestId}`,   /// Perphaps it should be a new ID, not the request ID
         
+        GSIPK: `REST#${restaurantId}`,
+        GSISK: `ORDER#ACTIVE#${requestId}`,
+
         ...data
     }
     
@@ -98,6 +107,23 @@ export async function putConfirmedOrder( confirmationEvent: ConfirmedOrder ){
         TableName: TABLE_NAME,
         Item: newConfirmationEvent,
     }));
+}
+
+
+
+export async function updateOrderToDeactivate(restaurantId: string, orderId: string){
+    await docClient.send( new UpdateCommand({
+        TableName: TABLE_NAME,
+        Key: {
+            PK: `REST#${restaurantId}`,
+            SK: `ORDER#${orderId}`
+        },
+        UpdateExpression: "REMOVE GSIPK, GSISK",  /* TODO SET #status = :status, completedAt = :ts*/
+        ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK)",
+        ReturnValues: "NONE",
+        // ExpressionAttributeNames: { '#status': 'status' },   // TODO: Include Status and datetime of the event
+        // ExpressionAttributeValues: { ':status': 'completed', ':ts': now }
+    }))
 }
 
 

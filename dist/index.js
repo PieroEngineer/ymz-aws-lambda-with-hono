@@ -2491,6 +2491,7 @@ var isContentEncodingBinary = (contentEncoding) => {
 // src/k.ts
 var ablyKeyWS = "4w64MA.R_FXWQ:2BlLaKwCQu5o2R6EoCt9RwNcoGNHIxOWs9pPFodpMhQ";
 var TABLE_NAME = "YummiziTable";
+var GSI_TABLE_NAME = "YummiziGsiTable";
 var BUCKET_NAME = "restaurant-assets";
 
 // src/clients/ablyClient.ts
@@ -2905,14 +2906,15 @@ async function generateS3PresignedUrl(s3Key) {
 }
 
 // src/repositories/paymentRepository.ts
-import { BatchGetCommand as BatchGetCommand2, PutCommand as PutCommand2, QueryCommand as QueryCommand2 } from "@aws-sdk/lib-dynamodb";
-async function getAllOrders(restaurantId) {
+import { BatchGetCommand as BatchGetCommand2, PutCommand as PutCommand2, QueryCommand as QueryCommand2, UpdateCommand as UpdateCommand2 } from "@aws-sdk/lib-dynamodb";
+async function getAllActiveOrders(restaurantId) {
   const queryParams = {
     TableName: TABLE_NAME,
-    KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+    IndexName: GSI_TABLE_NAME,
+    KeyConditionExpression: "GSIPK = :pk AND begins_with(GSISK, :skPrefix)",
     ExpressionAttributeValues: {
       ":pk": `REST#${restaurantId}`,
-      ":skPrefix": "ORDER#"
+      ":skPrefix": "ORDER#ACTIVE#"
     }
   };
   const dbResult = await docClient.send(new QueryCommand2(queryParams));
@@ -2970,6 +2972,8 @@ async function putConfirmedOrder(confirmationEvent) {
     PK: `REST#${restaurantId}`,
     SK: `ORDER#${requestId}`,
     /// Perphaps it should be a new ID, not the request ID
+    GSIPK: `REST#${restaurantId}`,
+    GSISK: `ORDER#ACTIVE#${requestId}`,
     ...data
   };
   console.log("\u{1F4BD}  Order to save in DynamoDB", JSON.stringify(newConfirmationEvent, null, 2), "\nfor restaurant ", confirmationEvent.restaurantId);
@@ -2978,19 +2982,37 @@ async function putConfirmedOrder(confirmationEvent) {
     Item: newConfirmationEvent
   }));
 }
+async function updateOrderToDeactivate(restaurantId, orderId) {
+  await docClient.send(new UpdateCommand2({
+    TableName: TABLE_NAME,
+    Key: {
+      PK: `REST#${restaurantId}`,
+      SK: `ORDER#${orderId}`
+    },
+    UpdateExpression: "REMOVE GSIPK, GSISK",
+    /* TODO SET #status = :status, completedAt = :ts*/
+    ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK)",
+    ReturnValues: "NONE"
+    // ExpressionAttributeNames: { '#status': 'status' },   // TODO: Include Status and datetime of the event
+    // ExpressionAttributeValues: { ':status': 'completed', ':ts': now }
+  }));
+}
 
 // src/services/paymentService.ts
-async function obtainAllOrders(restaurantId) {
-  return await getAllOrders(restaurantId);
+async function saveConfirmedOrder(confirmationEvent) {
+  await putConfirmedOrder(confirmationEvent);
+}
+async function obtainAllActiveOrders(restaurantId) {
+  return await getAllActiveOrders(restaurantId);
+}
+async function finalizeOrder(restaurantId, orderId) {
+  await updateOrderToDeactivate(restaurantId, orderId);
 }
 async function obtainSpecificDishesData(orderSelections, restaurantId) {
   return await getSpecificDishesData(orderSelections, restaurantId);
 }
 async function obtainPaymentPresignedUrl(s3Key) {
   return await generateS3PresignedUrl(s3Key);
-}
-async function saveConfirmedOrder(confirmationEvent) {
-  await putConfirmedOrder(confirmationEvent);
 }
 async function transmitConfirmationToRestaurant(confirmationEvent) {
   const channelName = `restaurant:${confirmationEvent.restaurantId}:ops`;
@@ -3066,11 +3088,24 @@ paymentsRouter.get("/:restaurantId", async (c) => {
     if (!rid) {
       return c.json({ error: "Missing restaurantId parameter" }, 400);
     }
-    const mappedPayloads = await obtainAllOrders(rid);
+    const mappedPayloads = await obtainAllActiveOrders(rid);
+    console.log(`\u{1F50E}\u{1F50E}  Mapped payloads for restaurantId: ${rid}: ${JSON.stringify(mappedPayloads)}`);
+    console.log(`\u2705  Fetched active orders for restaurantId: ${rid}`);
     return c.json(mappedPayloads, 200);
   } catch (error) {
     console.error(`\u{1F6A8} FETCH PAYMENT PRESELECTIONS ERROR: ${error.message}`);
     return c.json({ error: error.message || "Internal Server Error" }, 500);
+  }
+});
+paymentsRouter.post("/finalize", async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    await finalizeOrder(body.restaurantId, body.orderId);
+    console.log(`\u2705  Order finalized for restaurantId: ${body.restaurantId}, orderId: ${body.orderId}`);
+    return c.json({ message: "Order finalized successfully" }, 200);
+  } catch (e) {
+    console.error(`\u{1F6A8} FINALIZE ORDER ERROR: ${e.message}`);
+    return c.json({ error: e.message || "Internal Server Error" }, 500);
   }
 });
 
@@ -3081,7 +3116,7 @@ import {
   PutCommand as PutCommand3,
   QueryCommand as QueryCommand3,
   TransactWriteCommand,
-  UpdateCommand as UpdateCommand2
+  UpdateCommand as UpdateCommand3
 } from "@aws-sdk/lib-dynamodb";
 async function putRestaurantMetadata(restaurantId, data) {
   await docClient.send(
@@ -3121,7 +3156,7 @@ async function updateRestaurantMetadata(restaurantId, dataToUpdate) {
     return `${nameToken} = ${valueToken}`;
   });
   if (updateExpressions.length > 0) {
-    await docClient.send(new UpdateCommand2({
+    await docClient.send(new UpdateCommand3({
       TableName: TABLE_NAME,
       Key: {
         PK: `REST#${restaurantId}`,
@@ -3840,7 +3875,9 @@ import { PutCommand as PutCommand5 } from "@aws-sdk/lib-dynamodb";
 async function putFeedback(FeedbackPayload) {
   const newFeedbackItem = {
     PK: `USER#${FeedbackPayload.userId}`,
+    // FIXME: I think is better to put the Feedback as partition key, because we look for set of feedbacks, not for specific user's feedback
     SK: `FEEDBACK#${crypto.randomUUID()}`,
+    // TODO: Try with timestamp instead of UUID
     requestId: FeedbackPayload.requestId,
     conformDegree: FeedbackPayload.conformDegree,
     description: FeedbackPayload.description

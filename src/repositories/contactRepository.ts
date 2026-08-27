@@ -5,8 +5,8 @@ import { FeedbackItem, FeedbackPayload, RestaurantContactPayload } from "../type
 
 export async function putFeedback(FeedbackPayload: FeedbackPayload){
     const newFeedbackItem: FeedbackItem = {
-        PK: `USER#${FeedbackPayload.userId}`,
-        SK: `FEEDBACK#${crypto.randomUUID()}`,
+        PK: `USER#${FeedbackPayload.userId}`,   // FIXME: I think is better to put the Feedback as partition key, because we look for set of feedbacks, not for specific user's feedback
+        SK: `FEEDBACK#${crypto.randomUUID()}`,  // TODO: Try with timestamp instead of UUID
 
         requestId: FeedbackPayload.requestId,
         conformDegree: FeedbackPayload.conformDegree,

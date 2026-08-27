@@ -1,20 +1,32 @@
 import { transmitViaAbly } from "../clients/ablyClient";
 import { generateS3PresignedUrl } from "../clients/s3Client";
-import { getAllOrders, getSpecificDishesData, putConfirmedOrder } from "../repositories/paymentRepository";
+import { getAllActiveOrders, getSpecificDishesData, putConfirmedOrder, updateOrderToDeactivate } from "../repositories/paymentRepository";
 import { OrderItemPayload } from "../types/orders";
 import { ConfirmedOrder, dishPrice, Order } from "../types/payments";
 import { PresignedUrls } from "../types/s3Clients";
 
-export async function obtainAllOrders( restaurantId: string ): Promise<Order[]> {
-
-  return await getAllOrders( restaurantId )
-  
+export async function saveConfirmedOrder( confirmationEvent:  ConfirmedOrder ){
+  await putConfirmedOrder(confirmationEvent)
 }
+
+
+
+export async function obtainAllActiveOrders( restaurantId: string ): Promise<Order[]> {
+  return await getAllActiveOrders( restaurantId )
+}
+
+
+
+export async function finalizeOrder(restaurantId: string, orderId: string){
+  await updateOrderToDeactivate(restaurantId, orderId)
+}
+
+
 
 export async function obtainSpecificDishesData( orderSelections: OrderItemPayload[], restaurantId: string){ // TODO: Move it to restaurant service and its repo too
-
   return await getSpecificDishesData( orderSelections, restaurantId )
 }
+
 
 
 export async function obtainPaymentPresignedUrl( s3Key: string ) : Promise<PresignedUrls> {
@@ -22,9 +34,6 @@ export async function obtainPaymentPresignedUrl( s3Key: string ) : Promise<Presi
 }
 
 
-export async function saveConfirmedOrder( confirmationEvent:  ConfirmedOrder ){
-  await putConfirmedOrder(confirmationEvent)
-}
 
 export async function transmitConfirmationToRestaurant( confirmationEvent:  ConfirmedOrder ){
   const channelName = `restaurant:${confirmationEvent.restaurantId}:ops`;
@@ -34,6 +43,8 @@ export async function transmitConfirmationToRestaurant( confirmationEvent:  Conf
 
   await transmitViaAbly(channelName, eventName, confirmationEventToTransmit)
 }
+
+
 
 /**
  * Calculates total cost in cents with O(N + M) time complexity.
