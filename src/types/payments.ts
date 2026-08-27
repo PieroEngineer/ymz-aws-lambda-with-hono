@@ -23,8 +23,7 @@ export interface PaymentConfirmationResponse{
 }
 
 
-export interface Order{
-    
+export interface Order{ /// For now, it's practically "OrderResponse" // TODO: Try to divide all the types of all features in input, output and domain (mimic is valid between interfaces) 
     userId: string,
     requestId: string,
     userName: string,
@@ -32,8 +31,9 @@ export interface Order{
     groupSize: number,
     orderSelections: OrderItemPayload[],
     totalCostInCents: number,
-    lastUpdateTimestamp: number,
-    onPaidTimeStamp: number
+    // lastUpdateTimestamp: number,
+    onPaidTimeStamp: number,
+    paymentImageUrl: string
 }
 
 // --- Repository types ---
@@ -43,26 +43,19 @@ export interface dishPricesDbResponse {
     priceCents: number
 }
 
-export interface ConfirmationEventItem{
-    PK: string,
-    SK: string,
-
-    lastUpdateTimestamp: number
-    userName: string
-    userId: string
-    orderSelections: OrderItemPayload[]
-    arrivalTimeInMinutes: number
-    groupSize: number
-    totalCostInCents: number
-    onPaidTimeStamp: number
+export type ConfirmedOrderItem = Omit<Order, 'requestId'> & {
+    PK: string;
+    SK: string;
 }
-
 
 // --- Internal types ---
 
 export interface ConfirmedOrder extends Order {
     restaurantId: string,
+    paymentImageUrl: string
 }
+
+
 
 export interface dishPrice {
     dishId: string,

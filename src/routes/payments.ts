@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { calculateTotalCost, obtainAllOrders, obtainPaymentPresignedUrl, obtainSpecificDishesData, saveConfirmationEvent, transmitConfirmationToRestaurant } from "../services/paymentService.js"
+import { calculateTotalCost, obtainAllOrders, obtainPaymentPresignedUrl, obtainSpecificDishesData, saveConfirmedOrder as saveConfirmedOrder, transmitConfirmationToRestaurant } from "../services/paymentService.js"
 import { ConfirmedOrder, dishPrice, PaymentConfirmationPayload, PaymentConfirmationResponse } from "../types/payments.js";
 import { PresignedUrls } from "../types/s3Clients.js";
 
@@ -19,26 +19,33 @@ paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every 
     }
 
     const dishItems: dishPrice[] = await obtainSpecificDishesData(body.orderSelections, body.restaurantId)
+    console.log(`✅  Retrieved specific dish data for restaurantId: ${body.restaurantId}, requestId: ${body.requestId}`);
 
     const totalCostInCents = calculateTotalCost(body.orderSelections, dishItems);
+    console.log(`✅  Total cost calculated for restaurantId: ${body.restaurantId}, requestId: ${body.requestId} is ${totalCostInCents} cents`);
 
     // IN FAIL: I changed the menus for payments because that has more sense, look for possible bugs
     // const s3Key = `menus/${body.restaurantId}/${body.requestId}.webp`;  /// This shape could be useful when we use "S3 ObjectCreated event"
     const s3Key = `payments/${body.restaurantId}/${body.requestId}.webp`;  /// This shape could be useful when we use "S3 ObjectCreated event"
 
     const paymentImageReferences: PresignedUrls = await obtainPaymentPresignedUrl(s3Key)
+    console.log(`✅  Obtained presigned URLs for restaurantId: ${body.restaurantId}, requestId: ${body.requestId}`);
+    console.log(`🔎🔎  Presigned URLs: ${JSON.stringify(paymentImageReferences)}`);
 
     const now = Date.now()
     const newConfirmationEvent: ConfirmedOrder = {
       totalCostInCents: totalCostInCents,
-      lastUpdateTimestamp: now,
+      // lastUpdateTimestamp: now,
       onPaidTimeStamp: now,
+      paymentImageUrl: paymentImageReferences.publicUrl,
       ...body
     }
 
-    await saveConfirmationEvent(newConfirmationEvent)
+    await saveConfirmedOrder(newConfirmationEvent)
+    console.log(`✅  Order confirmed and saved for restaurantId: ${body.restaurantId}, requestId: ${body.requestId}`)
 
     await transmitConfirmationToRestaurant(newConfirmationEvent)
+    console.log(`✅  Confirmation transmitted to restaurantId: ${body.restaurantId}, requestId: ${body.requestId}`)
 
     const paymentConfirmationResponse: PaymentConfirmationResponse = {
       message: "Order saved successfully and broadcast state synchronized",
@@ -57,6 +64,8 @@ catch (error: any) {
 }
 
 });
+
+
 
 paymentsRouter.get("/:restaurantId", async (c) => {
   try {

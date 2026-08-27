@@ -1,7 +1,7 @@
 import { docClient } from "../docClient";
 import { TABLE_NAME } from "../k";
 import { OrderItemPayload } from "../types/orders";
-import { ConfirmedOrder, ConfirmationEventItem, dishPrice, dishPricesDbResponse, Order, PaymentConfirmationPayload } from "../types/payments";
+import { ConfirmedOrder, ConfirmedOrderItem, dishPrice, dishPricesDbResponse, Order, PaymentConfirmationPayload } from "../types/payments";
 import { BatchGetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 
 
@@ -20,18 +20,19 @@ export async function getAllOrders( restaurantId: string ): Promise<Order[]> {
     const rawItems = dbResult.Items || [];
 
     const mappedOrders = rawItems.map((item) => {
-      const requestId = item.SK.replace("ORDER#", "");
+        const requestId = item.SK.replace("ORDER#", "");
 
         const order: Order = {
             requestId,
             userName: item.userName,
-            lastUpdateTimestamp: item.lastUpdateTimestamp,
+            // lastUpdateTimestamp: item.lastUpdateTimestamp,
             userId: item.userId,
             orderSelections: item.orderSelections,
             arrivalTimeInMinutes: item.arrivalTimeInMinutes,
             groupSize: item.groupSize,
             totalCostInCents: item.totalCostInCents,
-            onPaidTimeStamp: item.onPaidTimeStamp
+            onPaidTimeStamp: item.onPaidTimeStamp,
+            paymentImageUrl: item.paymentImageUrl
         }
 
       return order
@@ -77,11 +78,11 @@ export async function getSpecificDishesData( orderSelections: OrderItemPayload[]
 
 }
 
-export async function putConfirmationEvent( confirmationEvent: ConfirmedOrder ){
+export async function putConfirmedOrder( confirmationEvent: ConfirmedOrder ){
 
     const {restaurantId, requestId, ...data} = confirmationEvent
 
-    const newConfirmationEvent: ConfirmationEventItem = {
+    const newConfirmationEvent: ConfirmedOrderItem = {
         PK: `REST#${restaurantId}`,
         SK: `ORDER#${requestId}`,   /// Perphaps it should be a new ID, not the request ID
         

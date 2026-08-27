@@ -2488,8 +2488,59 @@ var isContentEncodingBinary = (contentEncoding) => {
   return /^(gzip|deflate|compress|br)/.test(contentEncoding);
 };
 
-// src/routes/requests.ts
-import { QueryCommand, PutCommand, UpdateCommand, DynamoDBDocumentClient, DeleteCommand, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
+// src/k.ts
+var ablyKeyWS = "4w64MA.R_FXWQ:2BlLaKwCQu5o2R6EoCt9RwNcoGNHIxOWs9pPFodpMhQ";
+var TABLE_NAME = "YummiziTable";
+var BUCKET_NAME = "restaurant-assets";
+
+// src/clients/ablyClient.ts
+async function transmitViaAbly(channelName, eventName, dataPayload, maxAttempts = 3) {
+  if (!ablyKeyWS) {
+    throw new Error("ABLY_API_KEY is not defined");
+  }
+  const [username, password] = ablyKeyWS.split(":");
+  const credentials = btoa(`${username}:${password}`);
+  const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
+  let ablyDispatchSuccess = false;
+  let attempts = 0;
+  while (!ablyDispatchSuccess && attempts < maxAttempts) {
+    try {
+      attempts++;
+      const ablyResponse = await fetch(ablyEndpoint, {
+        method: "POST",
+        headers: {
+          "Authorization": `Basic ${credentials}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          name: eventName,
+          // The targeted subscriber frequency path matching mock constraints
+          data: dataPayload
+          // The exact TableRequestPayload DTO shape your staff app consumes
+        })
+      });
+      if (ablyResponse.ok) {
+        ablyDispatchSuccess = true;
+        console.log(`\u{1F4E1} [Attempt ${attempts}] Successfully order preselection event to Ably channel: ${channelName}`);
+        console.log(`\u{1F4E6}  Order to send: ${JSON.stringify({ name: eventName, data: dataPayload }, null, 2)}`);
+      } else {
+        console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Mock Ably returned a status error code: ${ablyResponse.status}`);
+      }
+    } catch (netErr) {
+      console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Network failure transmitting data payload to mock Ably server: ${netErr.message}`);
+    }
+  }
+  if (!ablyDispatchSuccess) {
+    console.error(`\u{1F6A8} CRITICAL: Failed to stream real-time broadcast alert data past ${maxAttempts} attempts. Database state remains fully valid.`);
+  }
+  return ablyDispatchSuccess;
+}
+
+// src/repositories/requestRepository.ts
+import { BatchGetCommand, DeleteCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+
+// src/docClient.ts
+import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 
 // src/aws/clientFactory.ts
 import { S3Client } from "@aws-sdk/client-s3";
@@ -2526,100 +2577,219 @@ var getDynamoDBClient = () => {
   return new DynamoDBClient({ region: awsRegion });
 };
 
-// src/k.ts
-var ablyKeyWS = "4w64MA.R_FXWQ:2BlLaKwCQu5o2R6EoCt9RwNcoGNHIxOWs9pPFodpMhQ";
-var TABLE_NAME = "YummiziTable";
-
-// src/routes/requests.ts
-var docClient = DynamoDBDocumentClient.from(getDynamoDBClient(), {
+// src/docClient.ts
+var rawDynamo = getDynamoDBClient();
+var docClient = DynamoDBDocumentClient.from(rawDynamo, {
   marshallOptions: { removeUndefinedValues: true }
 });
-var TABLE_NAME2 = "YummiziTable";
+
+// src/repositories/requestRepository.ts
+async function putRequest(restaurantId, requestId, requestData) {
+  const newRequestItem = {
+    PK: `REST#${restaurantId}`,
+    SK: `REQ#${requestId}`,
+    ...requestData
+  };
+  console.log("\u{1F4BD}  Request Item to save in DynamoDB", JSON.stringify(newRequestItem, null, 2), "\nfor restaurant ", restaurantId);
+  await docClient.send(new PutCommand({
+    TableName: TABLE_NAME,
+    Item: newRequestItem
+  }));
+}
+async function deleteRequest(restaurantId, requestId) {
+  const pk = `REST#${restaurantId}`;
+  const sk = `REQ#${requestId}`;
+  await docClient.send(new DeleteCommand({
+    // TODO: This is temporal  code and should be alternated with the commented code that is just above
+    TableName: TABLE_NAME,
+    Key: { PK: pk, SK: sk }
+  }));
+}
+async function queryRequestsByRestaurant(restaurantId) {
+  const queryParams = {
+    TableName: TABLE_NAME,
+    KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+    ExpressionAttributeValues: {
+      ":pk": `REST#${restaurantId}`,
+      ":skPrefix": "REQ#"
+    }
+  };
+  const dbResult = await docClient.send(new QueryCommand(queryParams));
+  return dbResult.Items || [];
+}
+async function updateRequestState(restaurantId, requestId, normalizedState) {
+  const pk = `REST#${restaurantId}`;
+  const sk = `REQ#${requestId}`;
+  await docClient.send(new UpdateCommand({
+    // TODO: Include the updating of the acceptance's timestamp too
+    TableName: TABLE_NAME,
+    Key: { PK: pk, SK: sk },
+    UpdateExpression: "SET #state = :state",
+    ExpressionAttributeNames: {
+      "#state": "state"
+    },
+    ExpressionAttributeValues: {
+      ":state": normalizedState
+    }
+  }));
+}
+async function batchGetRequests(requestsToUpdate) {
+  const formattedKeys = requestsToUpdate.map((item) => ({
+    PK: `REST#${item.restaurantId}`,
+    SK: `REQ#${item.requestId}`
+  }));
+  const batchResponse = await docClient.send(new BatchGetCommand({
+    RequestItems: {
+      [TABLE_NAME]: {
+        Keys: formattedKeys,
+        ConsistentRead: false
+        // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB)
+      }
+    }
+  }));
+  return batchResponse.Responses?.[TABLE_NAME] || [];
+}
+
+// src/services/requestService.ts
+async function saveRequest(requestPayload) {
+  const requestTime = Date.now();
+  const mockUserSpecifics = ["special day", "with vehicule"];
+  const baseRequestInfo = {
+    userId: requestPayload.userId,
+    userName: requestPayload.userName,
+    groupSize: requestPayload.groupSize,
+    onQueuedTimestamp: requestTime,
+    state: "QUEUED",
+    specifics: mockUserSpecifics,
+    arrivlaTime: requestPayload.arrivalTime
+  };
+  await putRequest(requestPayload.restaurantId, requestPayload.requestId, baseRequestInfo);
+  return baseRequestInfo;
+}
+async function transmitTableRequest(restaurantId, clientPayload) {
+  const channelName = `restaurant:${restaurantId}:ops`;
+  const requestName = "table-requested";
+  return await transmitViaAbly(channelName, requestName, clientPayload);
+}
+async function cancelRequest(restaurantId, requestId) {
+  await deleteRequest(restaurantId, requestId);
+}
+async function transmitRequestCancellation(cancelPayload, requestId) {
+  const clientPayload = {
+    requestId
+  };
+  let channelName;
+  switch (cancelPayload.actor) {
+    case "RESTAURANT":
+      channelName = `request:${cancelPayload.userId}`;
+    case "USER":
+      channelName = `restaurant:${cancelPayload.restaurantId}:ops`;
+  }
+  const requestName = "request-canceled";
+  return await transmitViaAbly(channelName, requestName, clientPayload);
+}
+async function obtainRestaurantRequests(restaurantId) {
+  const rawItems = await queryRequestsByRestaurant(restaurantId);
+  console.log(`\u{1F50D} Raw data to respond the GET request 
+${JSON.stringify(rawItems)} 
+For Restaurant: ${restaurantId}`);
+  const mappedPayloads = rawItems.map((item) => {
+    const requestId = item.SK.replace("REQ#", "");
+    return {
+      requestId,
+      userId: item.userId,
+      userName: item.userName,
+      groupSize: item.groupSize,
+      onQueuedTimestamp: item.onQueuedTimestamp,
+      state: item.state,
+      specifics: item.specifics,
+      arrivlaTime: item.arrivlaTime
+      // TODO: Correct the name "arrivalTimeInMinunes"
+    };
+  });
+  console.log(`1\uFE0F\u20E3\u{1F4E6}  Initialized UI state feed: Found 
+${JSON.stringify(mappedPayloads)} 
+For Restaurant: ${restaurantId}`);
+  return mappedPayloads;
+}
+async function updateRequestStatus(restaurantId, updatePayload) {
+  const normalizedState = String(updatePayload.newState);
+  await updateRequestState(restaurantId, updatePayload.requestId, normalizedState);
+  let channelName;
+  switch (normalizedState) {
+    case "ACCEPTED":
+      channelName = `request:${updatePayload.userId}`;
+      break;
+    case "READY":
+    // When the user notifies that they want to go to the restaurant
+    case "PAY_TRIED":
+      channelName = `restaurant:${restaurantId}:ops`;
+      break;
+  }
+  let realtimeNotified = false;
+  if (ablyKeyWS) {
+    console.log(`1\uFE0F\u20E3\u{1F4FA}  Channel to emit ${channelName}`);
+    const clientPayload = {
+      requestId: updatePayload.requestId,
+      newStatus: normalizedState
+    };
+    realtimeNotified = await transmitViaAbly(
+      channelName,
+      "request-status-updated",
+      /// Consider change Message's name by a code for security 
+      clientPayload,
+      1
+    );
+    if (!realtimeNotified) {
+      console.warn(`\u26A0\uFE0F Failed to broadcast request status update to Ably`);
+    }
+  } else {
+    console.warn("\u26A0\uFE0F ABLY_API_KEY is not defined; skipping realtime broadcast.");
+  }
+  return { normalizedState, realtimeNotified };
+}
+async function obtainActiveRequestStatuses(requestsToUpdate) {
+  const requestItems = await batchGetRequests(requestsToUpdate);
+  const mappedPayloads = requestItems.map((item) => {
+    const requestId = item.SK.replace("REQ#", "");
+    return {
+      requestId,
+      // restaurantId: restaurantId,
+      state: item.state
+      // userId: item.userId,
+      // //X userName: item.userName,
+      // groupSize: item.groupSize,
+      // onQueuedTimestamp: item.onQueuedTimestamp,
+      // specifics: item.specifics,
+      // arrivlaTime: item.arrivlaTime // TODO: Correct the name
+    };
+  });
+  console.log(`1\uFE0F\u20E3\u{1F4E6}  Requested Table requests from the  
+${JSON.stringify(mappedPayloads)} 
+`);
+  return mappedPayloads;
+}
+
+// src/routes/requests.ts
 var requestsRouter = new Hono2();
 requestsRouter.post("/create", async (c) => {
   try {
     const body = await c.req.json().catch(() => ({}));
-    const restaurantId = body.restaurantId;
-    const userId = body.userId;
-    const requestId = body.requestId;
-    const groupSize = body.groupSize;
-    const userName = body.userName;
-    const arrivalTime = body.arrivalTime;
-    if (!restaurantId || !userId || !requestId) {
+    if (!body.restaurantId || !body.userId || !body.requestId) {
       return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
     }
-    const requestTime = Date.now();
-    const mockUserSpecifics = ["special day", "with vehicule"];
-    const baseRequestInfo = {
-      userId,
-      userName,
-      groupSize,
-      onQueuedTimestamp: requestTime,
-      state: "QUEUED",
-      specifics: mockUserSpecifics,
-      arrivlaTime: arrivalTime
-    };
-    const newRequestItem = {
-      PK: `REST#${restaurantId}`,
-      SK: `REQ#${requestId}`,
-      ...baseRequestInfo
-    };
-    console.log("\u{1F4BD}  Request Item to save in DynamoDB", JSON.stringify(newRequestItem, null, 2), "\nfor restaurant ", restaurantId);
-    await docClient.send(new PutCommand({
-      TableName: TABLE_NAME2,
-      Item: newRequestItem
-    }));
+    const baseRequestInfo = await saveRequest(body);
     const clientPayload = {
-      requestId,
+      requestId: body.requestId,
       ...baseRequestInfo
     };
-    const apiKey = ablyKeyWS;
-    if (!apiKey) {
-      throw new Error("ABLY_API_KEY is not defined");
-    }
-    const [username, password] = apiKey.split(":");
-    const credentials = btoa(`${username}:${password}`);
-    const channelName = `restaurant:${restaurantId}:ops`;
-    const requestName = "table-requested";
-    const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
-    let ablyDispatchSuccess = false;
-    let attempts = 0;
-    const maxAttempts = 3;
-    while (!ablyDispatchSuccess && attempts < maxAttempts) {
-      try {
-        attempts++;
-        const ablyResponse = await fetch(ablyEndpoint, {
-          method: "POST",
-          headers: {
-            "Authorization": `Basic ${credentials}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            name: requestName,
-            // The targeted subscriber frequency path matching mock constraints
-            data: clientPayload
-            // The exact TableRequestPayload DTO shape your staff app consumes
-          })
-        });
-        if (ablyResponse.ok) {
-          ablyDispatchSuccess = true;
-          console.log(`\u{1F4E1} [Attempt ${attempts}] Successfully broadcast table request event to Ably channel: ${channelName}`);
-          console.log(`\u{1F4E6}  Data to send: ${JSON.stringify({ name: requestName, data: clientPayload }, null, 2)}`);
-        } else {
-          console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Mock Ably returned a status error code: ${ablyResponse.status}`);
-        }
-      } catch (netErr) {
-        console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Network failure transmitting data payload to mock Ably server: ${netErr.message}`);
-      }
-    }
-    if (!ablyDispatchSuccess) {
-      console.error(`\u{1F6A8} CRITICAL: Failed to stream real-time broadcast alert data past ${maxAttempts} attempts. Database state remains fully valid.`);
-    }
-    return c.json({
+    const ablyDispatchSuccess = await transmitTableRequest(body.restaurantId, clientPayload);
+    const createRequestResponse = {
       message: "Request created successfully and broadcast state synchronized",
-      requestId,
+      requestId: body.requestId,
       realtimeNotified: ablyDispatchSuccess
-    }, 201);
+    };
+    return c.json(createRequestResponse, 201);
   } catch (error) {
     console.error(`\u{1F6A8} CREATE REQ ERROR: ${error.message}`);
     return c.json({ error: error.message || "Internal Server Error" }, 500);
@@ -2630,79 +2800,20 @@ requestsRouter.post("/:requestId/cancel", async (c) => {
     const requestId = c.req.param("requestId");
     const body = await c.req.json().catch(() => ({}));
     console.log(` Body of the cancellation ${JSON.stringify(body, null, 2)}`);
-    const restaurantId = body.restaurantId;
-    const userId = body.userId;
-    const actor = body.actor;
-    if (!restaurantId) {
+    if (!body.restaurantId) {
       return c.json({ error: "Missing restaurantId" }, 400);
     }
     if (!requestId) {
       return c.json({ error: "Missing requestId" }, 400);
     }
-    if (!userId) {
+    if (!body.userId) {
       return c.json({ error: "Missing userId" }, 400);
     }
-    if (!actor) {
+    if (!body.actor) {
       return c.json({ error: "Missing cancellation actor" }, 400);
     }
-    const pk = `REST#${restaurantId}`;
-    const sk = `REQ#${requestId}`;
-    await docClient.send(new DeleteCommand({
-      // TODO: This is temporal  code and should be alternated with the commented code that is just above
-      TableName: TABLE_NAME2,
-      Key: { PK: pk, SK: sk }
-    }));
-    const clientPayload = {
-      requestId
-    };
-    const apiKey = ablyKeyWS;
-    if (!apiKey) {
-      throw new Error("ABLY_API_KEY is not defined");
-    }
-    const [username, password] = apiKey.split(":");
-    const credentials = btoa(`${username}:${password}`);
-    let channelName;
-    switch (actor) {
-      case "RESTAURANT":
-        channelName = `request:${userId}`;
-      case "USER":
-        channelName = `restaurant:${restaurantId}:ops`;
-    }
-    const requestName = "request-canceled";
-    const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
-    let ablyDispatchSuccess = false;
-    let attempts = 0;
-    const maxAttempts = 3;
-    while (!ablyDispatchSuccess && attempts < maxAttempts) {
-      try {
-        attempts++;
-        const ablyResponse = await fetch(ablyEndpoint, {
-          method: "POST",
-          headers: {
-            "Authorization": `Basic ${credentials}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            name: requestName,
-            // The targeted subscriber frequency path matching mock constraints
-            data: clientPayload
-            // The exact TableRequestPayload DTO shape your staff app consumes
-          })
-        });
-        if (ablyResponse.ok) {
-          ablyDispatchSuccess = true;
-          console.log(`\u{1F4E1} [Attempt ${attempts}] Successfully broadcast table request cancelation event to Ably channel: ${channelName}`);
-          console.log(`\u{1F4E6}  Data to send: ${JSON.stringify({ name: requestName, data: clientPayload }, null, 2)}`);
-        } else {
-          console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Mock Ably returned a status error code: ${ablyResponse.status}`);
-        }
-      } catch (netErr) {
-        console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Network failure transmitting data payload to mock Ably server: ${netErr.message}`);
-      }
-    }
-    if (!ablyDispatchSuccess) {
-      console.error(`\u{1F6A8} CRITICAL: Failed to stream real-time broadcast alert data past ${maxAttempts} attempts. Database state remains fully valid.`);
-    }
+    await cancelRequest(body.restaurantId, requestId);
+    await transmitRequestCancellation(body, requestId);
     return c.json({
       message: "Request cancelled successfully"
       // onCancellationTimestamp: timestamp
@@ -2723,36 +2834,7 @@ requestsRouter.get("/:restaurantId", async (c) => {
     if (!rid) {
       return c.json({ error: "Missing restaurantId parameter" }, 400);
     }
-    const queryParams = {
-      TableName: TABLE_NAME2,
-      KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
-      ExpressionAttributeValues: {
-        ":pk": `REST#${rid}`,
-        ":skPrefix": "REQ#"
-      }
-    };
-    const dbResult = await docClient.send(new QueryCommand(queryParams));
-    const rawItems = dbResult.Items || [];
-    console.log(`\u{1F50D} Raw data to respond the GET request 
-${JSON.stringify(rawItems)} 
-For Restaurant: ${rid}`);
-    const mappedPayloads = rawItems.map((item) => {
-      const requestId = item.SK.replace("REQ#", "");
-      return {
-        requestId,
-        userId: item.userId,
-        userName: item.userName,
-        groupSize: item.groupSize,
-        onQueuedTimestamp: item.onQueuedTimestamp,
-        state: item.state,
-        specifics: item.specifics,
-        arrivlaTime: item.arrivlaTime
-        // TODO: Correct the name "arrivalTimeInMinunes"
-      };
-    });
-    console.log(`1\uFE0F\u20E3\u{1F4E6}  Initialized UI state feed: Found 
-${JSON.stringify(mappedPayloads)} 
-For Restaurant: ${rid}`);
+    const mappedPayloads = await obtainRestaurantRequests(rid);
     return c.json(mappedPayloads, 200);
   } catch (error) {
     console.error(`\u{1F6A8} FETCH ACTIVE REQS ERROR: ${error.message}`);
@@ -2763,83 +2845,21 @@ requestsRouter.post("/:restaurantId/update", async (c) => {
   try {
     const restaurantId = c.req.param("restaurantId");
     const body = await c.req.json().catch(() => ({}));
-    const requestId = body.requestId;
-    const newState = body.newState;
-    const userId = body.userId;
     console.log(`1\uFE0F\u20E3\u{1F4E6}  Data arrived from restaurant ${restaurantId} 
 ${JSON.stringify(body)}`);
-    if (!restaurantId || !requestId || !newState) {
+    if (!restaurantId || !body.requestId || !body.newState) {
       return c.json({ error: "Missing restaurantId, requestId, or newState" }, 400);
     }
-    const pk = `REST#${restaurantId}`;
-    const sk = `REQ#${requestId}`;
-    const normalizedState = String(newState);
-    await docClient.send(new UpdateCommand({
-      // TODO: Include the updating of the acceptance's timestamp too
-      TableName: TABLE_NAME2,
-      Key: { PK: pk, SK: sk },
-      UpdateExpression: "SET #state = :state",
-      ExpressionAttributeNames: {
-        "#state": "state"
-      },
-      ExpressionAttributeValues: {
-        ":state": normalizedState
-      }
-    }));
-    let channelName;
-    switch (normalizedState) {
-      case "ACCEPTED":
-        channelName = `request:${userId}`;
-        break;
-      case "READY":
-      // When the user notifies that they want to go to the restaurant
-      case "PAY_TRIED":
-        channelName = `restaurant:${restaurantId}:ops`;
-        break;
-    }
-    const apiKey = ablyKeyWS;
-    let realtimeNotified = false;
-    if (apiKey) {
-      const [username, password] = apiKey.split(":");
-      const credentials = btoa(`${username}:${password}`);
-      console.log(`1\uFE0F\u20E3\u{1F4FA}  Channel to emit ${channelName}`);
-      const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
-      try {
-        const ablyResponse = await fetch(ablyEndpoint, {
-          method: "POST",
-          headers: {
-            "Authorization": `Basic ${credentials}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            name: "request-status-updated",
-            /// Consider change Message's name by a code for security 
-            data: {
-              // TODO: Move this to an object like above
-              //X restaurantId,
-              requestId,
-              newStatus: normalizedState
-            }
-          })
-        });
-        realtimeNotified = ablyResponse.ok;
-        if (!ablyResponse.ok) {
-          console.warn(`\u26A0\uFE0F Failed to broadcast request status update to Ably, status=${ablyResponse.status}`);
-        }
-      } catch (error) {
-        console.warn(`\u26A0\uFE0F Failed to broadcast request status update to Ably: ${error.message}`);
-      }
-    } else {
-      console.warn("\u26A0\uFE0F ABLY_API_KEY is not defined; skipping realtime broadcast.");
-    }
+    const { normalizedState, realtimeNotified } = await updateRequestStatus(restaurantId, body);
     console.log(`\u{1F50E}  The post of the request update finished`);
-    return c.json({
+    const updateRequestResponse = {
       message: "Request state updated successfully",
       restaurantId,
-      requestId,
+      requestId: body.requestId,
       newState: normalizedState,
       realtimeNotified
-    }, 200);
+    };
+    return c.json(updateRequestResponse, 200);
   } catch (error) {
     console.error(`\u{1F6A8} UPDATE REQ ERROR: ${error.message}`);
     return c.json({ error: error.message || "Internal Server Error" }, 500);
@@ -2849,37 +2869,7 @@ requestsRouter.post("/active", async (c) => {
   try {
     const body = await c.req.json().catch(() => ({}));
     const requestsToUpdate = body.requestsToUpdate;
-    const formattedKeys = requestsToUpdate.map((item) => ({
-      PK: `REST#${item.restaurantId}`,
-      SK: `REQ#${item.requestId}`
-    }));
-    const batchResponse = await docClient.send(new BatchGetCommand({
-      RequestItems: {
-        [TABLE_NAME2]: {
-          Keys: formattedKeys,
-          ConsistentRead: false
-          // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB)
-        }
-      }
-    }));
-    const requestItems = batchResponse.Responses?.[TABLE_NAME2] || [];
-    const mappedPayloads = requestItems.map((item) => {
-      const requestId = item.SK.replace("REQ#", "");
-      return {
-        requestId,
-        // restaurantId: restaurantId,
-        state: item.state
-        // userId: item.userId,
-        // //X userName: item.userName,
-        // groupSize: item.groupSize,
-        // onQueuedTimestamp: item.onQueuedTimestamp,
-        // specifics: item.specifics,
-        // arrivlaTime: item.arrivlaTime // TODO: Correct the name
-      };
-    });
-    console.log(`1\uFE0F\u20E3\u{1F4E6}  Requested Table requests from the  
-${JSON.stringify(mappedPayloads)} 
-`);
+    const mappedPayloads = await obtainActiveRequestStatuses(requestsToUpdate);
     return c.json({
       statuses: mappedPayloads
     }, 200);
@@ -2889,19 +2879,133 @@ ${JSON.stringify(mappedPayloads)}
   }
 });
 
-// src/routes/payments.ts
-import { QueryCommand as QueryCommand2, PutCommand as PutCommand2, DynamoDBDocumentClient as DynamoDBDocumentClient2, BatchGetCommand as BatchGetCommand2 } from "@aws-sdk/lib-dynamodb";
+// src/clients/s3Client.ts
+import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+var s3Client = getS3Client();
+async function generateS3PresignedUrl(s3Key) {
+  const unixEpoch = Math.floor(Date.now() / 1e3);
+  const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`;
+  const publicUrl = `${s3BaseUrl}/${s3Key}?v=${unixEpoch}`;
+  const uploadUrl = await getSignedUrl(
+    s3Client,
+    new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: s3Key,
+      ContentType: "image/webp"
+      // Enforces binary media type constraints
+    }),
+    { expiresIn: 900 }
+    // URL token token expires safely in 15 minutes
+  );
+  return {
+    publicUrl,
+    uploadUrl
+  };
+}
+
+// src/repositories/paymentRepository.ts
+import { BatchGetCommand as BatchGetCommand2, PutCommand as PutCommand2, QueryCommand as QueryCommand2 } from "@aws-sdk/lib-dynamodb";
+async function getAllOrders(restaurantId) {
+  const queryParams = {
+    TableName: TABLE_NAME,
+    KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+    ExpressionAttributeValues: {
+      ":pk": `REST#${restaurantId}`,
+      ":skPrefix": "ORDER#"
+    }
+  };
+  const dbResult = await docClient.send(new QueryCommand2(queryParams));
+  const rawItems = dbResult.Items || [];
+  const mappedOrders = rawItems.map((item) => {
+    const requestId = item.SK.replace("ORDER#", "");
+    const order = {
+      requestId,
+      userName: item.userName,
+      // lastUpdateTimestamp: item.lastUpdateTimestamp,
+      userId: item.userId,
+      orderSelections: item.orderSelections,
+      arrivalTimeInMinutes: item.arrivalTimeInMinutes,
+      groupSize: item.groupSize,
+      totalCostInCents: item.totalCostInCents,
+      onPaidTimeStamp: item.onPaidTimeStamp,
+      paymentImageUrl: item.paymentImageUrl
+    };
+    return order;
+  });
+  return mappedOrders;
+}
+async function getSpecificDishesData(orderSelections, restaurantId) {
+  const keys = orderSelections.map((selection) => ({
+    PK: `REST#${restaurantId}`,
+    SK: `RESOURCE#DISH#${selection.dishId}`
+  }));
+  const response = await docClient.send(new BatchGetCommand2({
+    /// Analyze if a transaction is more proper for this situation
+    RequestItems: {
+      [TABLE_NAME]: {
+        Keys: keys,
+        ConsistentRead: false,
+        // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB)
+        ProjectionExpression: "priceCents, SK"
+        // Optional: Save bandwidth
+      }
+    }
+  }));
+  const dishItems = response.Responses?.[TABLE_NAME] || [];
+  const priceMap = [];
+  for (let i = 0; i < dishItems.length; i++) {
+    const item = dishItems[i];
+    const dishId = item.SK.replace("RESOURCE#DISH#", "");
+    priceMap.push({
+      dishId,
+      priceCents: item.priceCents
+    });
+  }
+  return priceMap;
+}
+async function putConfirmedOrder(confirmationEvent) {
+  const { restaurantId, requestId, ...data } = confirmationEvent;
+  const newConfirmationEvent = {
+    PK: `REST#${restaurantId}`,
+    SK: `ORDER#${requestId}`,
+    /// Perphaps it should be a new ID, not the request ID
+    ...data
+  };
+  console.log("\u{1F4BD}  Order to save in DynamoDB", JSON.stringify(newConfirmationEvent, null, 2), "\nfor restaurant ", confirmationEvent.restaurantId);
+  await docClient.send(new PutCommand2({
+    TableName: TABLE_NAME,
+    Item: newConfirmationEvent
+  }));
+}
 
 // src/services/paymentService.ts
-function calculateTotalCost(selectedDishes, dynamoDbResponsesWithPrices) {
-  const numDbItems = dynamoDbResponsesWithPrices.length;
+async function obtainAllOrders(restaurantId) {
+  return await getAllOrders(restaurantId);
+}
+async function obtainSpecificDishesData(orderSelections, restaurantId) {
+  return await getSpecificDishesData(orderSelections, restaurantId);
+}
+async function obtainPaymentPresignedUrl(s3Key) {
+  return await generateS3PresignedUrl(s3Key);
+}
+async function saveConfirmedOrder(confirmationEvent) {
+  await putConfirmedOrder(confirmationEvent);
+}
+async function transmitConfirmationToRestaurant(confirmationEvent) {
+  const channelName = `restaurant:${confirmationEvent.restaurantId}:ops`;
+  const eventName = "order-confirmed";
+  const { restaurantId, ...confirmationEventToTransmit } = confirmationEvent;
+  await transmitViaAbly(channelName, eventName, confirmationEventToTransmit);
+}
+function calculateTotalCost(selectedDishes, dishItems) {
+  const numDishItems = dishItems.length;
   const numInputItems = selectedDishes.length;
   const priceMap = /* @__PURE__ */ new Map();
-  for (let i = 0; i < numDbItems; i++) {
-    const item = dynamoDbResponsesWithPrices[i];
-    const dishId = item.SK.replace("RESOURCE#DISH#", "");
-    if (item && dishId !== void 0 && item.priceCents !== void 0) {
-      priceMap.set(dishId, item.priceCents);
+  for (let i = 0; i < numDishItems; i++) {
+    const item = dishItems[i];
+    if (item.dishId !== void 0 && item.priceCents !== void 0) {
+      priceMap.set(item.dishId, item.priceCents);
     }
   }
   let totalCents = 0;
@@ -2916,142 +3020,41 @@ function calculateTotalCost(selectedDishes, dynamoDbResponsesWithPrices) {
 }
 
 // src/routes/payments.ts
-import { PutObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 var paymentsRouter = new Hono2();
-var s3Client = getS3Client();
-var docClient2 = DynamoDBDocumentClient2.from(getDynamoDBClient(), {
-  marshallOptions: { removeUndefinedValues: true }
-});
-var TABLE_NAME3 = "YummiziTable";
-var BUCKET_NAME = "restaurant-assets";
 paymentsRouter.post("/confirm", async (c) => {
-  const body = await c.req.json().catch(() => ({}));
-  const restaurantId = body.restaurantId;
-  const userId = body.userId;
-  const requestId = body.requestId;
-  const userName = body.userName;
-  const arrivalTimeInMinutes = body.arrivalTimeInMinutes;
-  const groupSize = body.groupSize;
-  const orderSelections = body.orderSelections;
-  if (!restaurantId || !userId || !requestId) {
-    return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
-  }
-  const keys = orderSelections.map((selection) => ({
-    PK: `REST#${restaurantId}`,
-    SK: `RESOURCE#DISH#${selection.dishId}`
-  }));
-  const command = new BatchGetCommand2({
-    /// Analyze if a transaction is more proper for this situation
-    RequestItems: {
-      [TABLE_NAME3]: {
-        Keys: keys,
-        ConsistentRead: false,
-        // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB)
-        ProjectionExpression: "priceCents, SK"
-        // Optional: Save bandwidth
-      }
-    }
-  });
-  const response = await docClient2.send(command);
-  const dishItems = response.Responses?.[TABLE_NAME3] || [];
-  const totalCostInCents = calculateTotalCost(orderSelections, dishItems);
-  const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME}`;
-  const s3Key = `menus/${restaurantId}/${requestId}.webp`;
-  const unixEpoch = Math.floor(Date.now() / 1e3);
-  const publicUrl = `${s3BaseUrl}/${s3Key}?v=${unixEpoch}`;
-  console.log("\u{1F50E}  publicUrl", publicUrl);
-  const uploadUrl = await getSignedUrl(
-    s3Client,
-    new PutObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: s3Key,
-      ContentType: "image/webp"
-      // Enforces binary media type constraints
-    }),
-    { expiresIn: 900 }
-    // URL token token expires safely in 15 minutes
-  );
-  const paymentImageReferences = {
-    uploadUrl,
-    publicUrl
-  };
-  const basePaymentPreselection = {
-    lastUpdateTimestamp: Date.now(),
-    userName,
-    userId,
-    orderSelections,
-    arrivalTimeInMinutes,
-    groupSize,
-    totalCostInCents,
-    onPaidTimeStamp: Date.now()
-    //paymentMethod,
-  };
-  const paymentPreselectionItem = {
-    PK: `REST#${restaurantId}`,
-    SK: `ORDER#${requestId}`,
-    /// Perphaps it should be a new ID, not the request ID
-    ...basePaymentPreselection
-  };
-  console.log("\u{1F4BD}  Order to save in DynamoDB", JSON.stringify(paymentPreselectionItem, null, 2), "\nfor restaurant ", restaurantId);
   try {
-    await docClient2.send(new PutCommand2({
-      TableName: TABLE_NAME3,
-      Item: paymentPreselectionItem
-    }));
-    const clientPayload = {
-      requestId,
-      ...basePaymentPreselection
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.restaurantId || !body.userId || !body.requestId) {
+      return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
+    }
+    const dishItems = await obtainSpecificDishesData(body.orderSelections, body.restaurantId);
+    console.log(`\u2705  Retrieved specific dish data for restaurantId: ${body.restaurantId}, requestId: ${body.requestId}`);
+    const totalCostInCents = calculateTotalCost(body.orderSelections, dishItems);
+    console.log(`\u2705  Total cost calculated for restaurantId: ${body.restaurantId}, requestId: ${body.requestId} is ${totalCostInCents} cents`);
+    const s3Key = `payments/${body.restaurantId}/${body.requestId}.webp`;
+    const paymentImageReferences = await obtainPaymentPresignedUrl(s3Key);
+    console.log(`\u2705  Obtained presigned URLs for restaurantId: ${body.restaurantId}, requestId: ${body.requestId}`);
+    console.log(`\u{1F50E}\u{1F50E}  Presigned URLs: ${JSON.stringify(paymentImageReferences)}`);
+    const now = Date.now();
+    const newConfirmationEvent = {
+      totalCostInCents,
+      // lastUpdateTimestamp: now,
+      onPaidTimeStamp: now,
+      paymentImageUrl: paymentImageReferences.publicUrl,
+      ...body
     };
-    const apiKey = ablyKeyWS;
-    if (!apiKey) {
-      throw new Error("ABLY_API_KEY is not defined");
-    }
-    const [username, password] = apiKey.split(":");
-    const credentials = btoa(`${username}:${password}`);
-    const channelName = `restaurant:${restaurantId}:ops`;
-    const requestName = "new-order-preselected";
-    const ablyEndpoint = `https://rest.ably.io/channels/${channelName}/messages`;
-    let ablyDispatchSuccess = false;
-    let attempts = 0;
-    const maxAttempts = 3;
-    while (!ablyDispatchSuccess && attempts < maxAttempts) {
-      try {
-        attempts++;
-        const ablyResponse = await fetch(ablyEndpoint, {
-          method: "POST",
-          headers: {
-            "Authorization": `Basic ${credentials}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            name: requestName,
-            // The targeted subscriber frequency path matching mock constraints
-            data: clientPayload
-            // The exact TableRequestPayload DTO shape your staff app consumes
-          })
-        });
-        if (ablyResponse.ok) {
-          ablyDispatchSuccess = true;
-          console.log(`\u{1F4E1} [Attempt ${attempts}] Successfully order preselection event to Ably channel: ${channelName}`);
-          console.log(`\u{1F4E6}  Order to send: ${JSON.stringify({ name: requestName, data: clientPayload }, null, 2)}`);
-        } else {
-          console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Mock Ably returned a status error code: ${ablyResponse.status}`);
-        }
-      } catch (netErr) {
-        console.warn(`\u26A0\uFE0F [Attempt ${attempts}] Network failure transmitting data payload to mock Ably server: ${netErr.message}`);
-      }
-    }
-    if (!ablyDispatchSuccess) {
-      console.error(`\u{1F6A8} CRITICAL: Failed to stream real-time broadcast alert data past ${maxAttempts} attempts. Database state remains fully valid.`);
-    }
-    return c.json({
+    await saveConfirmedOrder(newConfirmationEvent);
+    console.log(`\u2705  Order confirmed and saved for restaurantId: ${body.restaurantId}, requestId: ${body.requestId}`);
+    await transmitConfirmationToRestaurant(newConfirmationEvent);
+    console.log(`\u2705  Confirmation transmitted to restaurantId: ${body.restaurantId}, requestId: ${body.requestId}`);
+    const paymentConfirmationResponse = {
       message: "Order saved successfully and broadcast state synchronized",
-      requestId,
+      requestId: body.requestId,
       totalPriceInCents: totalCostInCents,
       paymentImageReferences
       // realtimeNotified: ablyDispatchSuccess
-    }, 201);
+    };
+    return c.json(paymentConfirmationResponse, 201);
   } catch (error) {
     console.error(`\u{1F6A8} CREATE REQ ERROR: ${error.message}`);
     return c.json({ error: error.message || "Internal Server Error" }, 500);
@@ -3063,30 +3066,7 @@ paymentsRouter.get("/:restaurantId", async (c) => {
     if (!rid) {
       return c.json({ error: "Missing restaurantId parameter" }, 400);
     }
-    const queryParams = {
-      TableName: TABLE_NAME3,
-      KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
-      ExpressionAttributeValues: {
-        ":pk": `REST#${rid}`,
-        ":skPrefix": "ORDER#"
-      }
-    };
-    const dbResult = await docClient2.send(new QueryCommand2(queryParams));
-    const rawItems = dbResult.Items || [];
-    const mappedPayloads = rawItems.map((item) => {
-      const requestId = item.SK.replace("ORDER#", "");
-      return {
-        requestId,
-        userName: item.userName,
-        lastUpdateTimestamp: item.lastUpdateTimestamp,
-        userId: item.userId,
-        orderSelections: item.orderSelections,
-        arrivalTimeInMinutes: item.arrivalTimeInMinutes,
-        groupSize: item.groupSize,
-        totalCostInCents: item.totalCostInCents,
-        onPaidTimeStamp: item.onPaidTimeStamp
-      };
-    });
+    const mappedPayloads = await obtainAllOrders(rid);
     return c.json(mappedPayloads, 200);
   } catch (error) {
     console.error(`\u{1F6A8} FETCH PAYMENT PRESELECTIONS ERROR: ${error.message}`);
@@ -3094,17 +3074,589 @@ paymentsRouter.get("/:restaurantId", async (c) => {
   }
 });
 
+// src/repositories/restaurantRepository.ts
+import {
+  BatchGetCommand as BatchGetCommand3,
+  GetCommand,
+  PutCommand as PutCommand3,
+  QueryCommand as QueryCommand3,
+  TransactWriteCommand,
+  UpdateCommand as UpdateCommand2
+} from "@aws-sdk/lib-dynamodb";
+async function putRestaurantMetadata(restaurantId, data) {
+  await docClient.send(
+    new PutCommand3({
+      TableName: TABLE_NAME,
+      Item: {
+        PK: `REST#${restaurantId}`,
+        SK: "METADATA",
+        ...data
+        // Unpacks and saves all incoming attributes
+      }
+    })
+  );
+}
+async function getRestaurantMetadata(restaurantId) {
+  const command = new GetCommand({
+    TableName: TABLE_NAME,
+    Key: {
+      PK: `REST#${restaurantId}`,
+      SK: "METADATA"
+    },
+    // Set to true only if you strictly need the absolute latest write
+    ConsistentRead: false
+  });
+  const response = await docClient.send(command);
+  return response.Item;
+}
+async function updateRestaurantMetadata(restaurantId, dataToUpdate) {
+  const updateEntries = Object.entries(dataToUpdate).filter(([, value]) => value !== void 0);
+  const expressionAttributeNames = {};
+  const expressionAttributeValues = {};
+  const updateExpressions = updateEntries.map(([field, value], index) => {
+    const nameToken = `#field${index}`;
+    const valueToken = `:value${index}`;
+    expressionAttributeNames[nameToken] = field;
+    expressionAttributeValues[valueToken] = value;
+    return `${nameToken} = ${valueToken}`;
+  });
+  if (updateExpressions.length > 0) {
+    await docClient.send(new UpdateCommand2({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `REST#${restaurantId}`,
+        SK: "METADATA"
+      },
+      UpdateExpression: `SET ${updateExpressions.join(", ")}`,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ExpressionAttributeValues: expressionAttributeValues
+    }));
+  }
+}
+async function queryUserFeedLinks(userId) {
+  const feedLinksResponse = await docClient.send(new QueryCommand3({
+    TableName: TABLE_NAME,
+    KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+    ExpressionAttributeValues: {
+      ":pk": `USER#${userId}`,
+      ":skPrefix": "SEC#"
+    }
+  }));
+  return feedLinksResponse.Items || [];
+}
+async function batchGetRestaurantMetadata(restaurantIds) {
+  const restaurantKeys = restaurantIds.map((rid) => ({ PK: `REST#${rid}`, SK: "METADATA" }));
+  const batchResponse = await docClient.send(new BatchGetCommand3({
+    RequestItems: {
+      [TABLE_NAME]: {
+        Keys: restaurantKeys
+        // ConsistentRead: false, // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB) /// FIXME: Necessary here? // Consistent read is used when the read is just after a writting
+      }
+    }
+  }));
+  return batchResponse.Responses?.[TABLE_NAME] || [];
+}
+async function queryRestaurantMenuResources(restaurantId) {
+  const response = await docClient.send(new QueryCommand3({
+    TableName: TABLE_NAME,
+    KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+    ExpressionAttributeValues: {
+      ":pk": `REST#${restaurantId}`,
+      ":skPrefix": "RESOURCE#"
+    }
+  }));
+  return response.Items || [];
+}
+async function getRestaurantPaymentMetadata(restaurantId) {
+  const response = await docClient.send(new GetCommand({
+    TableName: TABLE_NAME,
+    Key: {
+      PK: `REST#${restaurantId}`,
+      SK: "METADATA"
+    },
+    ConsistentRead: false,
+    ProjectionExpression: "phoneNumberToPay, phoneNumberToContact, paymentQrUrl"
+  }));
+  return response.Item;
+}
+function buildMenuPageDeleteTransactItem(restaurantId, pageId) {
+  const sk = `RESOURCE#MENU#${pageId}`;
+  return {
+    Delete: {
+      TableName: TABLE_NAME,
+      Key: { PK: `REST#${restaurantId}`, SK: sk }
+    }
+  };
+}
+function buildMenuPagePutTransactItem(restaurantId, pageId, pageNumber, publicUrl) {
+  const sk = `RESOURCE#MENU#${pageId}`;
+  return {
+    Put: {
+      TableName: TABLE_NAME,
+      Item: {
+        PK: `REST#${restaurantId}`,
+        SK: sk,
+        pageNumber: Number(pageNumber || 0),
+        /// Take care with that "0"
+        imageUrl: publicUrl
+        // 🎯 Overwritten with the final public reading URL string destination
+      }
+    }
+  };
+}
+function buildMenuPageUpdateTransactItem(restaurantId, pageId, updatedFields, publicUrl) {
+  const sk = `RESOURCE#MENU#${pageId}`;
+  const fieldMapping = {
+    imageUrl: "imageUrl",
+    pageNumber: "pageNumber"
+  };
+  const payloadSource = updatedFields;
+  const expressions = [];
+  const expressionAttributeValues = {};
+  for (const [clientKey, dbField] of Object.entries(fieldMapping)) {
+    if (payloadSource[clientKey] !== void 0) {
+      expressions.push(`${dbField} = :${clientKey}`);
+      if (["pageNumber"].includes(clientKey)) {
+        expressionAttributeValues[`:${clientKey}`] = Number(payloadSource[clientKey]);
+      } else if (clientKey === "imageUrl") {
+        expressionAttributeValues[`:${clientKey}`] = publicUrl;
+      } else {
+        expressionAttributeValues[`:${clientKey}`] = payloadSource[clientKey];
+      }
+    }
+  }
+  if (expressions.length === 0) {
+    return null;
+  }
+  return {
+    Update: {
+      TableName: TABLE_NAME,
+      Key: { PK: `REST#${restaurantId}`, SK: sk },
+      UpdateExpression: `SET ${expressions.join(", ")}`,
+      ExpressionAttributeValues: expressionAttributeValues
+    }
+  };
+}
+function buildDishDeleteTransactItem(restaurantId, dishId) {
+  const sk = `RESOURCE#DISH#${dishId}`;
+  return {
+    Delete: {
+      TableName: TABLE_NAME,
+      Key: { PK: `REST#${restaurantId}`, SK: sk }
+    }
+  };
+}
+function buildDishPutTransactItem(restaurantId, dish) {
+  const sk = `RESOURCE#DISH#${dish.id}`;
+  return {
+    Put: {
+      TableName: TABLE_NAME,
+      Item: {
+        // Shape of what is going to be sent
+        PK: `REST#${restaurantId}`,
+        SK: sk,
+        dishName: dish.name,
+        priceCents: Number(dish.priceCents || 0),
+        prepTime: Number(dish.prepTime || 0),
+        isOutOfStock: dish.isOutOfStock,
+        menuPageId: dish.menuPageId,
+        coordinateXInMenu: dish.coordinateXInMenu,
+        coordinateYInMenu: dish.coordinateYInMenu,
+        description: dish.description,
+        createdAt: Date.now(),
+        /**
+        * 💡 HINT FOR SIGNED URL TRANSITION:
+        * Strip down full path URLs to save only the relative storage object key identifiers
+        * when moving to signed asset validation loops.
+        */
+        imageUrl: dish.imageUrl
+      }
+    }
+  };
+}
+function buildDishUpdateTransactItem(restaurantId, dishId, updatedFields) {
+  const sk = `RESOURCE#DISH#${dishId}`;
+  const fieldMapping = {
+    name: "dishName",
+    priceCents: "priceCents",
+    prepTime: "prepTime",
+    menuPageId: "menuPageId",
+    coordinateXInMenu: "coordinateXInMenu",
+    coordinateYInMenu: "coordinateYInMenu",
+    description: "description",
+    isOutOfStock: "isOutOfStock",
+    imageUrl: "imageUrl",
+    createdAt: "createdAt"
+    /// Maybe it shouldn't be here because it'e never updated
+  };
+  const payloadSource = updatedFields;
+  const expressions = [];
+  const expressionAttributeValues = {};
+  for (const [clientKey, dbField] of Object.entries(fieldMapping)) {
+    if (payloadSource[clientKey] !== void 0) {
+      expressions.push(`${dbField} = :${clientKey}`);
+      if (["priceCents", "prepTime", "coordinateXInMenu", "coordinateYInMenu", "createdAt"].includes(clientKey)) {
+        expressionAttributeValues[`:${clientKey}`] = Number(payloadSource[clientKey]);
+      } else if (clientKey === "isOutOfStock") {
+        expressionAttributeValues[`:${clientKey}`] = Boolean(payloadSource[clientKey]);
+      } else {
+        expressionAttributeValues[`:${clientKey}`] = payloadSource[clientKey];
+      }
+    }
+  }
+  if (expressions.length === 0) {
+    return null;
+  }
+  return {
+    Update: {
+      TableName: TABLE_NAME,
+      Key: { PK: `REST#${restaurantId}`, SK: sk },
+      UpdateExpression: `SET ${expressions.join(", ")}`,
+      ExpressionAttributeValues: expressionAttributeValues
+    }
+  };
+}
+async function executeMenuTransaction(transactionItems) {
+  await docClient.send(new TransactWriteCommand({
+    TransactItems: transactionItems
+  }));
+}
+
+// src/services/restaurantService.ts
+async function initializeRestaurantInfo(restaurantId, payload) {
+  console.log(`\u{1F50E}\u{1F3EA}  Initialize restaurant info whose ID is ${restaurantId}
+`, JSON.stringify(payload, null, 2));
+  const logoS3Key = `logo/${restaurantId}.webp`;
+  const logoPresigned = await generateS3PresignedUrl(logoS3Key);
+  console.log("\u{1F50E}\u{1F5BC}\uFE0F  Logo public Url", logoPresigned.publicUrl);
+  console.log("\u2705\u{1F5BC}\uFE0F  Logo Url generated");
+  const dishImagePublicUrls = [];
+  const dishesToUploadShowUrls = [];
+  for (let i = 0; i < 3; i++) {
+    if (payload.dishesToShowUrlsRequired[i]) {
+      const s3Key = `front/${i}/${restaurantId}.webp`;
+      const dishPresigned = await generateS3PresignedUrl(s3Key);
+      console.log(`\u{1F50E}\u{1F5BC}\uFE0F  dish ${i} to show image public Url`, dishPresigned.publicUrl);
+      dishImagePublicUrls.push(dishPresigned.publicUrl);
+      dishesToUploadShowUrls[i] = dishPresigned.uploadUrl;
+      console.log("\u2705\u{1F5BC}\uFE0F  Dish image upload Url");
+    } else {
+      dishImagePublicUrls.push("");
+      dishesToUploadShowUrls.push("");
+    }
+  }
+  const qrS3Key = `qr/${restaurantId}.webp`;
+  const qrPresigned = await generateS3PresignedUrl(qrS3Key);
+  console.log("\u{1F50E}\u{1F5BC}\uFE0F  QR public Url", qrPresigned.publicUrl);
+  console.log("\u2705\u{1F5BC}\uFE0F  QR Url generated");
+  const dataToUpload = {
+    name: payload.restaurantName,
+    logoUrl: logoPresigned.publicUrl,
+    latitude: payload.latitude,
+    longitude: payload.longitude,
+    dishesToShowUrl1: dishImagePublicUrls[0],
+    dishesToShowUrl2: dishImagePublicUrls[1],
+    dishesToShowUrl3: dishImagePublicUrls[2],
+    phoneNumberToPay: payload.phoneNumberToPay,
+    phoneNumberToContact: payload.phoneNumberToContact,
+    paymentQrUrl: qrPresigned.publicUrl,
+    isOpen: true,
+    //true
+    isInitialized: true
+  };
+  console.log(`\u{1F50E}\u{1F3EA}  Initialize restaurant info whose ID is ${restaurantId}
+`, JSON.stringify(dataToUpload, null, 2));
+  await putRestaurantMetadata(restaurantId, dataToUpload);
+  console.log(`\u2705\u2934\uFE0F  restaurant info initialized: ${restaurantId}`);
+  return {
+    logoPresignedUrl: logoPresigned.uploadUrl,
+    dishesToShowPresignedUrls: dishesToUploadShowUrls,
+    paymentQrPresignedUrl: qrPresigned.uploadUrl
+  };
+}
+async function obtainRestaurantInfo(restaurantId) {
+  const restaurantItem = await getRestaurantMetadata(restaurantId);
+  if (!restaurantItem) {
+    console.log(`\u26A0\uFE0F\u{1F3EA}  Restaurant (${restaurantId}) wasn't found. Returning an empty restaurant 
+`);
+    return {
+      // Temporal shape for a restaurant that wasn't initialized in the table yet 
+      restaurantId: "",
+      restaurantName: "",
+      logoUrl: "",
+      latitude: 0,
+      longitude: 0,
+      // openTime: '',
+      // closeTime: '',
+      dishesToShowUrls: ["", "", ""],
+      phoneNumberToPay: "",
+      phoneNumberToContact: "",
+      paymentQrUrl: "",
+      // isOpen: true, // TODO
+      isInitialized: false
+    };
+  }
+  console.log(`\u{1F50E}\u{1F3EA}  Restaurant info fetched for ID: ${restaurantId}
+`, restaurantItem);
+  return {
+    restaurantId: restaurantItem.PK.replace("REST#", ""),
+    restaurantName: restaurantItem.name,
+    logoUrl: restaurantItem.logoUrl,
+    latitude: restaurantItem.latitude,
+    // longitude: restaurantItem.longitude,
+    // openTime: restaurantItem.openTime,
+    closeTime: restaurantItem.closeTime,
+    dishesToShowUrls: [restaurantItem.dishesToShowUrl1, restaurantItem.dishesToShowUrl2, restaurantItem.dishesToShowUrl3],
+    phoneNumberToPay: restaurantItem.phoneNumberToPay,
+    phoneNumberToContact: restaurantItem.phoneNumberToContact,
+    paymentQrUrl: restaurantItem.paymentQrUrl,
+    // isOpen: true, // TODO
+    isInitialized: restaurantItem.isInitialized
+  };
+}
+async function updateRestaurantInfo(restaurantId, payload) {
+  console.log(`\u{1F50E}\u{1F3EA}  Restaurant info received for ID: ${restaurantId}
+`, JSON.stringify(payload, null, 2));
+  const dataToUpdate = {
+    name: payload.restaurantName,
+    latitude: payload.latitude,
+    longitude: payload.longitude,
+    // openTime: openTime,
+    // closeTime: closeTime,
+    phoneNumberToPay: payload.phoneNumberToPay,
+    phoneNumberToContact: payload.phoneNumberToContact
+  };
+  let logoUploadUrl;
+  if (payload.logoUrlRequired) {
+    const logoS3Key = `logo/${restaurantId}.webp`;
+    const logoPresigned = await generateS3PresignedUrl(logoS3Key);
+    console.log("\u{1F50E}\u{1F5BC}\uFE0F  Logo public Url", logoPresigned.publicUrl);
+    logoUploadUrl = logoPresigned.uploadUrl;
+    dataToUpdate.logoUrl = logoPresigned.publicUrl;
+    console.log("\u2705\u{1F5BC}\uFE0F  Logo upload Url");
+  } else {
+    logoUploadUrl = "";
+  }
+  const dishImageSelection = [
+    (dishImageUrl) => {
+      dataToUpdate.dishesToShowUrl1 = dishImageUrl;
+    },
+    (dishImageUrl) => {
+      dataToUpdate.dishesToShowUrl2 = dishImageUrl;
+    },
+    (dishImageUrl) => {
+      dataToUpdate.dishesToShowUrl3 = dishImageUrl;
+    }
+  ];
+  const dishesToUploadShowUrls = new Array(3);
+  for (let i = 0; i < 3; i++) {
+    if (payload.dishesToShowUrlsRequired[i] === true) {
+      const s3Key = `front/${i}/${restaurantId}.webp`;
+      const dishPresigned = await generateS3PresignedUrl(s3Key);
+      console.log(`\u{1F50E}\u{1F5BC}\uFE0F  dish ${i} to show image public Url`, dishPresigned.publicUrl);
+      dishImageSelection[i](dishPresigned.publicUrl);
+      dishesToUploadShowUrls[i] = dishPresigned.uploadUrl;
+      console.log("\u2705\u{1F5BC}\uFE0F  Dish image upload Url");
+    } else {
+      dishesToUploadShowUrls[i] = "";
+    }
+  }
+  let qrUploadUrl;
+  if (payload.paymentQrUrlsRequired) {
+    const qrS3Key = `qr/${restaurantId}.webp`;
+    const qrPresigned = await generateS3PresignedUrl(qrS3Key);
+    console.log("\u{1F50E}\u{1F5BC}\uFE0F  QR public Url", qrPresigned.publicUrl);
+    dataToUpdate.paymentQrUrl = qrPresigned.publicUrl;
+    qrUploadUrl = qrPresigned.uploadUrl;
+    console.log("\u2705\u{1F5BC}\uFE0F  QR upload Url");
+  } else {
+    qrUploadUrl = "";
+  }
+  await updateRestaurantMetadata(restaurantId, dataToUpdate);
+  console.log(`\u2705\u2934\uFE0F Updating restaurant info: ${restaurantId}`);
+  return {
+    logoPresignedUrl: logoUploadUrl,
+    dishesToShowPresignedUrls: dishesToUploadShowUrls,
+    paymentQrPresignedUrl: qrUploadUrl
+  };
+}
+async function obtainPersonalizedFeed(userId) {
+  console.log(`\u{1F50E}\u{1F60C}  Fetching personalized feed for User: ${userId}`);
+  console.log(`\u{1F50E}\u{1F60C} User ID was fown: ${userId}`);
+  const feedLinks = await queryUserFeedLinks(userId);
+  const MOCK_USER_ID = "00000000-0000-4000-a000-000000000000";
+  const MOCK_RESTAURANT_ID = "4258e0fa-6b3c-43bc-a6d8-82c5835d608d";
+  const mockFeedLinks = [
+    {
+      PK: `USER#${MOCK_USER_ID}`,
+      SK: `SEC#Popular#${MOCK_RESTAURANT_ID}`,
+      addedDate: (/* @__PURE__ */ new Date()).toISOString()
+    }
+  ];
+  console.log("\u{1F50E}\u{1F3EA}  Mock data\n", mockFeedLinks, "\n\u{1F3EA}  seed data\n", feedLinks);
+  const sectionMap = {};
+  const restaurantIds = [];
+  for (const link of mockFeedLinks) {
+    const parts = link.SK.split("#");
+    const sectionName = parts[1];
+    const rid = parts[2];
+    restaurantIds.push(rid);
+    sectionMap[rid] = sectionName;
+  }
+  console.log(`\u{1F50E}\u{1F3EA}  restaurantIds: ${JSON.stringify(restaurantIds, null, 2)}`);
+  console.log(`\u{1F50E}\u{1F3EA}  sectionMap: ${JSON.stringify(sectionMap, null, 2)}`);
+  const rawRestaurants = await batchGetRestaurantMetadata(restaurantIds);
+  console.log(`\u{1F50E}\u{1F3EA}  Fetched ${rawRestaurants.length} personalized feed items ${JSON.stringify(rawRestaurants, null, 2)}`);
+  const formattedFeed = rawRestaurants.map((res) => {
+    const rid = res.PK.replace("REST#", "");
+    const originalDishes = [res.dishesToShowUrl1 || "", res.dishesToShowUrl2 || "", res.dishesToShowUrl3 || ""];
+    return {
+      id: rid,
+      name: res.name,
+      logoUrl: res.logoUrl || "",
+      sectionType: sectionMap[rid] || "General",
+      dishesToShowUrls: originalDishes
+      //isOpen // TODO: When the restaurant is reay to open
+      //isInitialized // FIXME: Only show restaurants that were initialized
+    };
+  });
+  console.log(`\u2705\u{1F3EA} Personalized feed items fetched and formatted for User: ${userId}
+`);
+  console.log(`A sample of data is
+ ${formattedFeed[0]}
+`);
+  return formattedFeed;
+}
+async function obtainRestaurantMenu(restaurantId) {
+  const items = await queryRestaurantMenuResources(restaurantId);
+  const menuPages = [];
+  const dishes = [];
+  for (const item of items) {
+    const sk = item.SK || "";
+    if (sk.startsWith("RESOURCE#MENU#")) {
+      menuPages.push({
+        pageId: sk.replace("RESOURCE#MENU#", ""),
+        imageUrl: item.imageUrl || "",
+        pageNumber: Number(item.pageNumber || 0)
+        /// Check if sending it to page 0 is ok in case of fail
+      });
+    } else if (sk.startsWith("RESOURCE#DISH#")) {
+      if ((item.priceCents ?? null) !== null && (item.prepTime ?? null) !== null) {
+        dishes.push({
+          id: sk.replace("RESOURCE#DISH#", ""),
+          name: item.dishName,
+          imageUrl: item.dishImageUrl || "",
+          priceCents: Number(item.priceCents),
+          /// Does it work without "Number" parser?
+          prepTime: Number(item.prepTime),
+          isOutOfStock: Boolean(item.isOutOfStock || false),
+          menuPageId: item.menuPageId,
+          coordinateXInMenu: item.coordinateXInMenu,
+          coordinateYInMenu: item.coordinateYInMenu,
+          createdAt: item.createdAt,
+          description: item.description || ""
+        });
+      } else {
+        console.log(`\u{1F6A8}  There was an issue with the price or preparation time of ${sk.replace("RESOURCE#DISH#", "")} | Fallback: pin is not sent`);
+      }
+    }
+  }
+  menuPages.sort((a, b) => a.pageNumber - b.pageNumber);
+  console.log(`\u{1F50E}\u{1F4C3}  Menu info attached and mapped for Restaurant ID:
+${restaurantId}`);
+  console.log("\u{1F50E}  The menu menu pages are:", JSON.stringify(menuPages, null, 2));
+  console.log("\u{1F50E}  The menu dishes are:", JSON.stringify(dishes, null, 2));
+  return {
+    menuPages,
+    dishes
+  };
+}
+async function synchronizeRestaurantMenu(restaurantId, payload) {
+  const menuPages = payload.menuPages || [];
+  const dishes = payload.dishes || [];
+  console.log("\u{1F37D}\uFE0F  dishes to update\n", dishes);
+  const transactionItems = [];
+  const presignedUrls = [];
+  console.log(`\u{1F50E}\u{1F4C3}  Pages received:
+${JSON.stringify(menuPages, null, 2)}`);
+  for (const page of menuPages) {
+    const pageId = page.pageId;
+    const action = page.action;
+    if (action === "delete") {
+      transactionItems.push(buildMenuPageDeleteTransactItem(restaurantId, pageId));
+    } else if (action === "save" || action === "update") {
+      const s3Key = `menus/${pageId}.webp`;
+      const pagePresigned = await generateS3PresignedUrl(s3Key);
+      console.log("\u{1F50E}  publicUrl", pagePresigned.publicUrl);
+      console.log("\u{1F50E}  uploadUrl", pagePresigned.uploadUrl);
+      presignedUrls.push({
+        pageId,
+        uploadUrl: pagePresigned.uploadUrl,
+        publicUrl: pagePresigned.publicUrl
+      });
+      if (action === "save") {
+        transactionItems.push(
+          buildMenuPagePutTransactItem(restaurantId, pageId, Number(page.pageNumber || 0), pagePresigned.publicUrl)
+        );
+      } else if (action === "update") {
+        const updateItem = buildMenuPageUpdateTransactItem(
+          restaurantId,
+          pageId,
+          page.updatedFields || {},
+          pagePresigned.publicUrl
+        );
+        if (updateItem) {
+          transactionItems.push(updateItem);
+        }
+      }
+    }
+  }
+  for (const dish of dishes) {
+    const dishId = dish.id;
+    const action = dish.action;
+    if (action === "delete") {
+      transactionItems.push(buildDishDeleteTransactItem(restaurantId, dishId));
+    } else if (action === "save") {
+      transactionItems.push(buildDishPutTransactItem(restaurantId, dish));
+    } else if (action === "update") {
+      const updateItem = buildDishUpdateTransactItem(restaurantId, dishId, dish.updatedFields || {});
+      if (updateItem) {
+        transactionItems.push(updateItem);
+      }
+    }
+  }
+  console.log(`\u{1F50E}\u{1F4C3}  Data to be transacted:
+${JSON.stringify(transactionItems, null, 2)}`);
+  if (transactionItems.length === 0) {
+    return { message: "No menu or dish mutations provided." };
+  }
+  if (transactionItems.length > 100) {
+    throw new Error("Transaction block exceeds AWS limit of 100 items.");
+  }
+  await executeMenuTransaction(transactionItems);
+  const responsePayload = {
+    message: "Menu state successfully synchronized atomically",
+    presignedUrls
+  };
+  console.log(`\u2705\u2934\uFE0F TransactWrite completed: Synchronized menu states for Restaurant: ${restaurantId}`);
+  return responsePayload;
+}
+async function obtainRestaurantPaymentInfo(restaurantId) {
+  const metadata = await getRestaurantPaymentMetadata(restaurantId);
+  if (!metadata) {
+    throw new Error("\u{1F6A9} Restaurant payment metadata not found");
+  }
+  const phoneNumberToPay = metadata.phoneNumberToPay;
+  const phoneNumberToContact = metadata.phoneNumberToContact;
+  const paymentQrUrl = typeof metadata.paymentQrUrl === "string" ? metadata.paymentQrUrl : "";
+  return {
+    phoneNumberToPay,
+    phoneNumberToContact,
+    paymentQrUrl
+  };
+}
+
 // src/routes/restaurants.ts
-import { QueryCommand as QueryCommand3, BatchGetCommand as BatchGetCommand3, GetCommand, DynamoDBDocumentClient as DynamoDBDocumentClient3, UpdateCommand as UpdateCommand2, PutCommand as PutCommand3 } from "@aws-sdk/lib-dynamodb";
-import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
-import { PutObjectCommand as PutObjectCommand2 } from "@aws-sdk/client-s3";
-import { getSignedUrl as getSignedUrl2 } from "@aws-sdk/s3-request-presigner";
-var s3Client2 = getS3Client();
-var docClient3 = DynamoDBDocumentClient3.from(getDynamoDBClient(), {
-  marshallOptions: { removeUndefinedValues: true }
-});
-var TABLE_NAME4 = "YummiziTable";
-var BUCKET_NAME2 = "restaurant-assets";
 var restaurantsRouter = new Hono2();
 restaurantsRouter.post("/:restaurantId/info/initialize", async (c) => {
   try {
@@ -3113,108 +3665,8 @@ restaurantsRouter.post("/:restaurantId/info/initialize", async (c) => {
       return c.json({ error: "restaurantId is required" }, 400);
     }
     const body = await c.req.json().catch(() => ({}));
-    const restaurantName = body.restaurantName;
-    const latitude = body.latitude;
-    const longitude = body.longitude;
-    const dishesToShowUrlsRequired = body.dishesToShowUrlsRequired;
-    const phoneNumberToPay = body.phoneNumberToPay;
-    const phoneNumberToContact = body.phoneNumberToContact;
-    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
-    console.log(`\u{1F50E}\u{1F3EA}  Initialize restaurant info whose ID is ${restaurantId}
-`, JSON.stringify(body, null, 2));
-    const logoS3Key = `logo/${restaurantId}.webp`;
-    const logoUnixEpoch = Math.floor(Date.now() / 1e3);
-    const logoPublicUrl = `${s3BaseUrl}/${logoS3Key}?v=${logoUnixEpoch}`;
-    console.log("\u{1F50E}\u{1F5BC}\uFE0F  Logo public Url", logoPublicUrl);
-    const logoUploadUrl = await getSignedUrl2(
-      s3Client2,
-      new PutObjectCommand2({
-        Bucket: BUCKET_NAME2,
-        Key: logoS3Key,
-        ContentType: "image/webp"
-        // Enforces binary media type constraints
-      }),
-      { expiresIn: 900 }
-      // URL token token expires safely in 15 minutes
-    );
-    console.log("\u2705\u{1F5BC}\uFE0F  Logo Url generated");
-    const dishImagePublicUrls = [];
-    const dishesToUploadShowUrls = [];
-    for (let i = 0; i < 3; i++) {
-      if (dishesToShowUrlsRequired[i]) {
-        const s3Key = `front/${i}/${restaurantId}.webp`;
-        const unixEpoch = Math.floor(Date.now() / 1e3);
-        const dishImagePublicUrl = `${s3BaseUrl}/${s3Key}?v=${unixEpoch}`;
-        console.log(`\u{1F50E}\u{1F5BC}\uFE0F  dish ${i} to show image public Url`, dishImagePublicUrl);
-        dishImagePublicUrls.push(dishImagePublicUrl);
-        const dishImageUploadUrl = await getSignedUrl2(
-          s3Client2,
-          new PutObjectCommand2({
-            Bucket: BUCKET_NAME2,
-            Key: s3Key,
-            ContentType: "image/webp"
-            // Enforces binary media type constraints
-          }),
-          { expiresIn: 900 }
-          // URL token token expires safely in 15 minutes
-        );
-        dishesToUploadShowUrls[i] = dishImageUploadUrl;
-        console.log("\u2705\u{1F5BC}\uFE0F  Dish image upload Url");
-      } else {
-        dishImagePublicUrls.push("");
-        dishesToUploadShowUrls.push("");
-      }
-    }
-    const qrS3Key = `qr/${restaurantId}.webp`;
-    const qrUnixEpoch = Math.floor(Date.now() / 1e3);
-    const qrPublicUrl = `${s3BaseUrl}/${qrS3Key}?v=${qrUnixEpoch}`;
-    console.log("\u{1F50E}\u{1F5BC}\uFE0F  QR public Url", qrPublicUrl);
-    const qrUploadUrl = await getSignedUrl2(
-      s3Client2,
-      new PutObjectCommand2({
-        Bucket: BUCKET_NAME2,
-        Key: qrS3Key,
-        ContentType: "image/webp"
-        // Enforces binary media type constraints
-      }),
-      { expiresIn: 900 }
-      // URL token token expires safely in 15 minutes
-    );
-    console.log("\u2705\u{1F5BC}\uFE0F  QR Url generated");
-    const dataToUpload = {
-      name: restaurantName,
-      logoUrl: logoPublicUrl,
-      latitude,
-      longitude,
-      dishesToShowUrl1: dishImagePublicUrls[0],
-      dishesToShowUrl2: dishImagePublicUrls[1],
-      dishesToShowUrl3: dishImagePublicUrls[2],
-      phoneNumberToPay,
-      phoneNumberToContact,
-      paymentQrUrl: qrPublicUrl,
-      isOpen: true,
-      //true
-      isInitialized: true
-    };
-    console.log(`\u{1F50E}\u{1F3EA}  Initialize restaurant info whose ID is ${restaurantId}
-`, JSON.stringify(dataToUpload, null, 2));
-    await docClient3.send(
-      new PutCommand3({
-        TableName: TABLE_NAME4,
-        Item: {
-          PK: `REST#${restaurantId}`,
-          SK: "METADATA",
-          ...dataToUpload
-          // Unpacks and saves all incoming attributes
-        }
-      })
-    );
-    console.log(`\u2705\u2934\uFE0F  restaurant info initialized: ${restaurantId}`);
-    return c.json({
-      logoPresignedUrl: logoUploadUrl,
-      dishesToShowPresignedUrls: dishesToUploadShowUrls,
-      paymentQrPresignedUrl: qrUploadUrl
-    }, 200);
+    const initializeResponse = await initializeRestaurantInfo(restaurantId, body);
+    return c.json(initializeResponse, 200);
   } catch (error) {
     console.error(`\u{1F6A8} RESTAURANT RESTAURANT INFO ERROR -> ${error.message}`);
     return c.json({ error: "Internal Server Error" }, 500);
@@ -3226,57 +3678,8 @@ restaurantsRouter.get("/:restaurantId/info", async (c) => {
     if (!restaurantId) {
       return c.json({ error: `Missing restaurantId ${restaurantId}` }, 400);
     }
-    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
-    const command = new GetCommand({
-      TableName: TABLE_NAME4,
-      Key: {
-        PK: `REST#${restaurantId}`,
-        SK: "METADATA"
-      },
-      // Set to true only if you strictly need the absolute latest write
-      ConsistentRead: false
-    });
-    const response = await docClient3.send(command);
-    if (!response.Item) {
-      console.log(`\u26A0\uFE0F\u{1F3EA}  Restaurant (${restaurantId}) wasn't found. Returning an empty restaurant 
-`);
-      return c.json({
-        // Temporal shape for a restaurant that wasn't initialized in the table yet 
-        restaurantId: "",
-        restaurantName: "",
-        logoUrl: "",
-        latitude: 0,
-        longitude: 0,
-        // openTime: '',
-        // closeTime: '',
-        dishesToShowUrls: ["", "", ""],
-        phoneNumberToPay: "",
-        phoneNumberToContact: "",
-        paymentQrUrl: "",
-        // isOpen: true, // TODO
-        isInitialized: false
-      });
-    }
-    const restaurantItem = response.Item;
-    console.log(`\u{1F50E}\u{1F3EA}  Restaurant info fetched for ID: ${restaurantId}
-`, restaurantItem);
-    return c.json(
-      {
-        restaurantId: restaurantItem.PK.replace("REST#", ""),
-        restaurantName: restaurantItem.name,
-        logoUrl: restaurantItem.logoUrl,
-        latitude: restaurantItem.latitude,
-        // longitude: restaurantItem.longitude,
-        // openTime: restaurantItem.openTime,
-        closeTime: restaurantItem.closeTime,
-        dishesToShowUrls: [restaurantItem.dishesToShowUrl1, restaurantItem.dishesToShowUrl2, restaurantItem.dishesToShowUrl3],
-        phoneNumberToPay: restaurantItem.phoneNumberToPay,
-        phoneNumberToContact: restaurantItem.phoneNumberToContact,
-        paymentQrUrl: restaurantItem.paymentQrUrl,
-        // isOpen: true, // TODO
-        isInitialized: restaurantItem.isInitialized
-      }
-    );
+    const restaurantInfo = await obtainRestaurantInfo(restaurantId);
+    return c.json(restaurantInfo);
   } catch (error) {
     return c.json({ error: "Internal Server Error", details: error.message }, 500);
   }
@@ -3288,134 +3691,8 @@ restaurantsRouter.post("/:restaurantId/info/update", async (c) => {
       return c.json({ error: "restaurantId is required" }, 400);
     }
     const body = await c.req.json().catch(() => ({}));
-    const restaurantName = body.restaurantName;
-    const logoUrlRequired = body.logoUrlRequired;
-    const latitude = body.latitude;
-    const longitude = body.longitude;
-    const dishesToShowUrlsRequired = body.dishesToShowUrlsRequired;
-    const phoneNumberToPay = body.phoneNumberToPay;
-    const phoneNumberToContact = body.phoneNumberToContact;
-    const paymentQrUrlsRequired = body.paymentQrUrlsRequired;
-    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
-    console.log(`\u{1F50E}\u{1F3EA}  Restaurant info received for ID: ${restaurantId}
-`, JSON.stringify(body, null, 2));
-    const dataToUpdate = {
-      name: restaurantName,
-      latitude,
-      longitude,
-      // openTime: openTime,
-      // closeTime: closeTime,
-      phoneNumberToPay,
-      phoneNumberToContact
-    };
-    let logoUploadUrl;
-    if (logoUrlRequired) {
-      const logoS3Key = `logo/${restaurantId}.webp`;
-      const logoUnixEpoch = Math.floor(Date.now() / 1e3);
-      const logoPublicUrl = `${s3BaseUrl}/${logoS3Key}?v=${logoUnixEpoch}`;
-      console.log("\u{1F50E}\u{1F5BC}\uFE0F  Logo public Url", logoPublicUrl);
-      logoUploadUrl = await getSignedUrl2(
-        s3Client2,
-        new PutObjectCommand2({
-          Bucket: BUCKET_NAME2,
-          Key: logoS3Key,
-          ContentType: "image/webp"
-          // Enforces binary media type constraints
-        }),
-        { expiresIn: 900 }
-        // URL token token expires safely in 15 minutes
-      );
-      dataToUpdate.logoUrl = logoPublicUrl;
-      console.log("\u2705\u{1F5BC}\uFE0F  Logo upload Url");
-    } else {
-      logoUploadUrl = "";
-    }
-    const dishImageSelection = [
-      (dishImageUrl) => {
-        dataToUpdate.dishesToShowUrl1 = dishImageUrl;
-      },
-      (dishImageUrl) => {
-        dataToUpdate.dishesToShowUrl2 = dishImageUrl;
-      },
-      (dishImageUrl) => {
-        dataToUpdate.dishesToShowUrl3 = dishImageUrl;
-      }
-    ];
-    const dishesToUploadShowUrls = new Array(3);
-    for (let i = 0; i < 3; i++) {
-      if (dishesToShowUrlsRequired[i] === true) {
-        const s3Key = `front/${i}/${restaurantId}.webp`;
-        const unixEpoch = Math.floor(Date.now() / 1e3);
-        const dishImagePublicUrl = `${s3BaseUrl}/${s3Key}?v=${unixEpoch}`;
-        console.log(`\u{1F50E}\u{1F5BC}\uFE0F  dish ${i} to show image public Url`, dishImagePublicUrl);
-        dishImageSelection[i](dishImagePublicUrl);
-        const dishImageUploadUrl = await getSignedUrl2(
-          s3Client2,
-          new PutObjectCommand2({
-            Bucket: BUCKET_NAME2,
-            Key: s3Key,
-            ContentType: "image/webp"
-            // Enforces binary media type constraints
-          }),
-          { expiresIn: 900 }
-          // URL token token expires safely in 15 minutes
-        );
-        dishesToUploadShowUrls[i] = dishImageUploadUrl;
-        console.log("\u2705\u{1F5BC}\uFE0F  Dish image upload Url");
-      } else {
-        dishesToUploadShowUrls[i] = "";
-      }
-    }
-    let qrUploadUrl;
-    if (paymentQrUrlsRequired) {
-      const qrS3Key = `qr/${restaurantId}.webp`;
-      const qrUnixEpoch = Math.floor(Date.now() / 1e3);
-      const qrPublicUrl = `${s3BaseUrl}/${qrS3Key}?v=${qrUnixEpoch}`;
-      console.log("\u{1F50E}\u{1F5BC}\uFE0F  QR public Url", qrPublicUrl);
-      dataToUpdate.paymentQrUrl = qrPublicUrl;
-      qrUploadUrl = await getSignedUrl2(
-        s3Client2,
-        new PutObjectCommand2({
-          Bucket: BUCKET_NAME2,
-          Key: qrS3Key,
-          ContentType: "image/webp"
-          // Enforces binary media type constraints
-        }),
-        { expiresIn: 900 }
-        // URL token token expires safely in 15 minutes
-      );
-      console.log("\u2705\u{1F5BC}\uFE0F  QR upload Url");
-    } else {
-      qrUploadUrl = "";
-    }
-    const updateEntries = Object.entries(dataToUpdate).filter(([, value]) => value !== void 0);
-    const expressionAttributeNames = {};
-    const expressionAttributeValues = {};
-    const updateExpressions = updateEntries.map(([field, value], index) => {
-      const nameToken = `#field${index}`;
-      const valueToken = `:value${index}`;
-      expressionAttributeNames[nameToken] = field;
-      expressionAttributeValues[valueToken] = value;
-      return `${nameToken} = ${valueToken}`;
-    });
-    if (updateExpressions.length > 0) {
-      await docClient3.send(new UpdateCommand2({
-        TableName: TABLE_NAME4,
-        Key: {
-          PK: `REST#${restaurantId}`,
-          SK: "METADATA"
-        },
-        UpdateExpression: `SET ${updateExpressions.join(", ")}`,
-        ExpressionAttributeNames: expressionAttributeNames,
-        ExpressionAttributeValues: expressionAttributeValues
-      }));
-    }
-    console.log(`\u2705\u2934\uFE0F Updating restaurant info: ${restaurantId}`);
-    return c.json({
-      logoPresignedUrl: logoUploadUrl,
-      dishesToShowPresignedUrls: dishesToUploadShowUrls,
-      paymentQrPresignedUrl: qrUploadUrl
-    }, 200);
+    const updateResponse = await updateRestaurantInfo(restaurantId, body);
+    return c.json(updateResponse, 200);
   } catch (error) {
     console.error(`\u{1F6A8} UPDATE RESTAURANT INFO ERROR -> ${error.message}`);
     return c.json({ error: "Internal Server Error" }, 500);
@@ -3424,71 +3701,11 @@ restaurantsRouter.post("/:restaurantId/info/update", async (c) => {
 restaurantsRouter.get("/feed", async (c) => {
   try {
     const userId = c.req.query("userId");
-    console.log(`\u{1F50E}\u{1F60C}  Fetching personalized feed for User: ${userId}`);
     if (!userId) {
       console.log(`\u{1F534}\u{1F50E}\u{1F60C} User ID was not fown: ${userId}`);
       return c.json({ error: "Missing userId" }, 400);
     }
-    console.log(`\u{1F50E}\u{1F60C} User ID was fown: ${userId}`);
-    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
-    const feedLinksResponse = await docClient3.send(new QueryCommand3({
-      TableName: TABLE_NAME4,
-      KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
-      ExpressionAttributeValues: {
-        ":pk": `USER#${userId}`,
-        ":skPrefix": "SEC#"
-      }
-    }));
-    const feedLinks = feedLinksResponse.Items || [];
-    const MOCK_USER_ID = "00000000-0000-4000-a000-000000000000";
-    const MOCK_RESTAURANT_ID = "4258e0fa-6b3c-43bc-a6d8-82c5835d608d";
-    const mockFeedLinks = [
-      {
-        PK: `USER#${MOCK_USER_ID}`,
-        SK: `SEC#Popular#${MOCK_RESTAURANT_ID}`,
-        addedDate: (/* @__PURE__ */ new Date()).toISOString()
-      }
-    ];
-    console.log("\u{1F50E}\u{1F3EA}  Mock data\n", mockFeedLinks, "\n\u{1F3EA}  seed data\n", feedLinks);
-    const restaurantKeys = [];
-    const sectionMap = {};
-    for (const link of mockFeedLinks) {
-      const parts = link.SK.split("#");
-      const sectionName = parts[1];
-      const rid = parts[2];
-      restaurantKeys.push({ PK: `REST#${rid}`, SK: "METADATA" });
-      sectionMap[rid] = sectionName;
-    }
-    console.log(`\u{1F50E}\u{1F3EA}  restaurantKeys: ${JSON.stringify(restaurantKeys, null, 2)}`);
-    console.log(`\u{1F50E}\u{1F3EA}  sectionMap: ${JSON.stringify(sectionMap, null, 2)}`);
-    const batchResponse = await docClient3.send(new BatchGetCommand3({
-      RequestItems: {
-        [TABLE_NAME4]: {
-          Keys: restaurantKeys
-          // ConsistentRead: false, // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB) /// FIXME: Necessary here? // Consistent read is used when the read is just after a writting
-        }
-      }
-    }));
-    const rawRestaurants = batchResponse.Responses?.[TABLE_NAME4] || [];
-    console.log(`\u{1F50E}\u{1F3EA}  Fetched ${rawRestaurants.length} personalized feed items ${JSON.stringify(rawRestaurants, null, 2)}`);
-    const formattedFeed = rawRestaurants.map((res) => {
-      const rid = res.PK.replace("REST#", "");
-      const originalDishes = [res.dishesToShowUrl1 || "", res.dishesToShowUrl2 || "", res.dishesToShowUrl3 || ""];
-      return {
-        id: rid,
-        name: res.name,
-        logoUrl: res.logoUrl || "",
-        sectionType: sectionMap[rid] || "General",
-        dishesToShowUrls: originalDishes
-        //isOpen // TODO: When the restaurant is reay to open
-        //isInitialized // FIXME: Only show restaurants that were initialized
-      };
-    });
-    console.log(`\u2705\u{1F3EA} Personalized feed items fetched and formatted for User: ${userId}
-`);
-    console.log(`A sample of data is
- ${formattedFeed[0]}
-`);
+    const formattedFeed = await obtainPersonalizedFeed(userId);
     return c.json(formattedFeed, 200);
   } catch (error) {
     console.error(`\u{1F6A8} FEED ROUTE ERROR: ${error.message}`);
@@ -3501,57 +3718,8 @@ restaurantsRouter.get("/:restaurantId/menu", async (c) => {
     if (!rid) {
       return c.json({ error: "restaurantId is required" }, 400);
     }
-    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
-    const response = await docClient3.send(new QueryCommand3({
-      TableName: TABLE_NAME4,
-      KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
-      ExpressionAttributeValues: {
-        ":pk": `REST#${rid}`,
-        ":skPrefix": "RESOURCE#"
-      }
-    }));
-    const items = response.Items || [];
-    const menuPages = [];
-    const dishes = [];
-    for (const item of items) {
-      const sk = item.SK || "";
-      if (sk.startsWith("RESOURCE#MENU#")) {
-        menuPages.push({
-          pageId: sk.replace("RESOURCE#MENU#", ""),
-          imageUrl: item.imageUrl || "",
-          pageNumber: Number(item.pageNumber || 0)
-          /// Check if sending it to page 0 is ok in case of fail
-        });
-      } else if (sk.startsWith("RESOURCE#DISH#")) {
-        if ((item.priceCents ?? null) !== null && (item.prepTime ?? null) !== null) {
-          dishes.push({
-            id: sk.replace("RESOURCE#DISH#", ""),
-            name: item.dishName,
-            imageUrl: item.dishImageUrl || "",
-            priceCents: Number(item.priceCents),
-            /// Does it work without "Number" parser?
-            prepTime: Number(item.prepTime),
-            isOutOfStock: Boolean(item.isOutOfStock || false),
-            menuPageId: item.menuPageId,
-            coordinateXInMenu: item.coordinateXInMenu,
-            coordinateYInMenu: item.coordinateYInMenu,
-            createdAt: item.createdAt,
-            description: item.description || ""
-          });
-        } else {
-          console.log(`\u{1F6A8}  There was an issue with the price or preparation time of ${sk.replace("RESOURCE#DISH#", "")} | Fallback: pin is not sent`);
-        }
-      }
-    }
-    menuPages.sort((a, b) => a.pageNumber - b.pageNumber);
-    console.log(`\u{1F50E}\u{1F4C3}  Menu info attached and mapped for Restaurant ID:
-${rid}`);
-    console.log("\u{1F50E}  The menu menu pages are:", JSON.stringify(menuPages, null, 2));
-    console.log("\u{1F50E}  The menu dishes are:", JSON.stringify(dishes, null, 2));
-    return c.json({
-      menuPages,
-      dishes
-    }, 200);
+    const menuResponse = await obtainRestaurantMenu(rid);
+    return c.json(menuResponse, 200);
   } catch (error) {
     console.error(`\u{1F6A8} MENU ROUTE ERROR: ${error.message}`);
     return c.json({ error: "Internal Server Error" }, 500);
@@ -3564,190 +3732,15 @@ restaurantsRouter.post("/:restaurantId/menu", async (c) => {
       return c.json({ error: "restaurantId is required" }, 400);
     }
     const body = await c.req.json().catch(() => ({}));
-    const menuPages = body.menuPages || [];
-    const dishes = body.dishes || [];
-    console.log("\u{1F37D}\uFE0F  dishes to update\n", dishes);
-    const transactionItems = [];
-    const presignedUrls = [];
-    const s3BaseUrl = `http://localhost:4566/${BUCKET_NAME2}`;
-    console.log(`\u{1F50E}\u{1F4C3}  Pages received:
-${JSON.stringify(menuPages, null, 2)}`);
-    for (const page of menuPages) {
-      const pageId = page.pageId;
-      const action = page.action;
-      const sk = `RESOURCE#MENU#${pageId}`;
-      if (action === "delete") {
-        transactionItems.push({
-          Delete: {
-            TableName: TABLE_NAME4,
-            Key: { PK: `REST#${rid}`, SK: sk }
-          }
-        });
-      } else if (action === "save" || action === "update") {
-        const s3Key = `menus/${pageId}.webp`;
-        const unixEpoch = Math.floor(Date.now() / 1e3);
-        const publicUrl = `${s3BaseUrl}/${s3Key}?v=${unixEpoch}`;
-        console.log("\u{1F50E}  publicUrl", publicUrl);
-        const uploadUrl = await getSignedUrl2(
-          s3Client2,
-          new PutObjectCommand2({
-            Bucket: BUCKET_NAME2,
-            Key: s3Key,
-            ContentType: "image/webp"
-            // Enforces binary media type constraints
-          }),
-          { expiresIn: 900 }
-          // URL token token expires safely in 15 minutes
-        );
-        console.log("\u{1F50E}  uploadUrl", uploadUrl);
-        presignedUrls.push({
-          pageId,
-          uploadUrl,
-          publicUrl
-        });
-        if (action === "save") {
-          transactionItems.push({
-            Put: {
-              TableName: TABLE_NAME4,
-              Item: {
-                PK: `REST#${rid}`,
-                SK: sk,
-                pageNumber: Number(page.pageNumber || 0),
-                /// Take care with that "0"
-                imageUrl: publicUrl
-                // 🎯 Overwritten with the final public reading URL string destination
-              }
-            }
-          });
-        } else if (action === "update") {
-          const fieldMapping = {
-            imageUrl: "imageUrl",
-            pageNumber: "pageNumber"
-          };
-          const payloadSource = page.updatedFields;
-          const expressions = [];
-          const expressionAttributeValues = {};
-          for (const [clientKey, dbField] of Object.entries(fieldMapping)) {
-            if (payloadSource[clientKey] !== void 0) {
-              expressions.push(`${dbField} = :${clientKey}`);
-              if (["pageNumber"].includes(clientKey)) {
-                expressionAttributeValues[`:${clientKey}`] = Number(payloadSource[clientKey]);
-              } else if (clientKey === "imageUrl") {
-                expressionAttributeValues[`:${clientKey}`] = publicUrl;
-              } else {
-                expressionAttributeValues[`:${clientKey}`] = payloadSource[clientKey];
-              }
-            }
-          }
-          if (expressions.length > 0) {
-            transactionItems.push({
-              Update: {
-                TableName: TABLE_NAME4,
-                Key: { PK: `REST#${rid}`, SK: sk },
-                UpdateExpression: `SET ${expressions.join(", ")}`,
-                ExpressionAttributeValues: expressionAttributeValues
-              }
-            });
-          }
-        }
-      }
+    const syncResult = await synchronizeRestaurantMenu(rid, body);
+    if ("presignedUrls" in syncResult) {
+      return c.json(syncResult, 200);
     }
-    for (const dish of dishes) {
-      const dishId = dish.id;
-      const action = dish.action;
-      const sk = `RESOURCE#DISH#${dishId}`;
-      if (action === "delete") {
-        transactionItems.push({
-          Delete: {
-            TableName: TABLE_NAME4,
-            Key: { PK: `REST#${rid}`, SK: sk }
-          }
-        });
-      } else if (action === "save") {
-        transactionItems.push({
-          Put: {
-            TableName: TABLE_NAME4,
-            Item: {
-              // Shape of what is going to be sent
-              PK: `REST#${rid}`,
-              SK: sk,
-              dishName: dish.name,
-              priceCents: Number(dish.priceCents || 0),
-              prepTime: Number(dish.prepTime || 0),
-              isOutOfStock: dish.isOutOfStock,
-              menuPageId: dish.menuPageId,
-              coordinateXInMenu: dish.coordinateXInMenu,
-              coordinateYInMenu: dish.coordinateYInMenu,
-              description: dish.description,
-              createdAt: Date.now(),
-              /**
-              * 💡 HINT FOR SIGNED URL TRANSITION:
-              * Strip down full path URLs to save only the relative storage object key identifiers
-              * when moving to signed asset validation loops.
-              */
-              imageUrl: dish.imageUrl
-            }
-          }
-        });
-      } else if (action === "update") {
-        const fieldMapping = {
-          name: "dishName",
-          priceCents: "priceCents",
-          prepTime: "prepTime",
-          menuPageId: "menuPageId",
-          coordinateXInMenu: "coordinateXInMenu",
-          coordinateYInMenu: "coordinateYInMenu",
-          description: "description",
-          isOutOfStock: "isOutOfStock",
-          imageUrl: "imageUrl",
-          createdAt: "createdAt"
-          /// Maybe it shouldn't be here because it'e never updated
-        };
-        const payloadSource = dish.updatedFields;
-        const expressions = [];
-        const expressionAttributeValues = {};
-        for (const [clientKey, dbField] of Object.entries(fieldMapping)) {
-          if (payloadSource[clientKey] !== void 0) {
-            expressions.push(`${dbField} = :${clientKey}`);
-            if (["priceCents", "prepTime", "coordinateXInMenu", "coordinateYInMenu", "createdAt"].includes(clientKey)) {
-              expressionAttributeValues[`:${clientKey}`] = Number(payloadSource[clientKey]);
-            } else if (clientKey === "isOutOfStock") {
-              expressionAttributeValues[`:${clientKey}`] = Boolean(payloadSource[clientKey]);
-            } else {
-              expressionAttributeValues[`:${clientKey}`] = payloadSource[clientKey];
-            }
-          }
-        }
-        if (expressions.length > 0) {
-          transactionItems.push({
-            Update: {
-              TableName: TABLE_NAME4,
-              Key: { PK: `REST#${rid}`, SK: sk },
-              UpdateExpression: `SET ${expressions.join(", ")}`,
-              ExpressionAttributeValues: expressionAttributeValues
-            }
-          });
-        }
-      }
-    }
-    console.log(`\u{1F50E}\u{1F4C3}  Data to be transacted:
-${JSON.stringify(transactionItems, null, 2)}`);
-    if (transactionItems.length === 0) {
-      return c.json({ message: "No menu or dish mutations provided." }, 200);
-    }
-    if (transactionItems.length > 100) {
-      return c.json({ error: "Transaction block exceeds AWS limit of 100 items." }, 400);
-    }
-    await docClient3.send(new TransactWriteCommand({
-      TransactItems: transactionItems
-    }));
-    const responsePayload = {
-      message: "Menu state successfully synchronized atomically",
-      presignedUrls
-    };
-    console.log(`\u2705\u2934\uFE0F TransactWrite completed: Synchronized menu states for Restaurant: ${rid}`);
-    return c.json(responsePayload, 200);
+    return c.json(syncResult, 200);
   } catch (error) {
+    if (error.message === "Transaction block exceeds AWS limit of 100 items.") {
+      return c.json({ error: error.message }, 400);
+    }
     console.error(`\u{1F6A8} SYNC MENU ROUTE ERROR -> ${error.message}`);
     return c.json({ error: "Internal Server Error" }, 500);
   }
@@ -3758,39 +3751,57 @@ restaurantsRouter.get("/:restaurantId/payment", async (c) => {
     if (!rid) {
       return c.json({ error: "restaurantId is required" }, 400);
     }
-    const response = await docClient3.send(new GetCommand({
-      TableName: TABLE_NAME4,
-      Key: {
-        PK: `REST#${rid}`,
-        SK: "METADATA"
-      },
-      ConsistentRead: false,
-      ProjectionExpression: "phoneNumberToPay, phoneNumberToContact, paymentQrUrl"
-    }));
-    const metadata = response.Item;
-    if (!metadata) {
-      return c.json({ error: "\u{1F6A9} Restaurant payment metadata not found" }, 404);
-    }
-    const phoneNumberToPay = metadata.phoneNumberToPay;
-    const phoneNumberToContact = metadata.phoneNumberToContact;
-    const paymentQrUrl = typeof metadata.paymentQrUrl === "string" ? metadata.paymentQrUrl : "";
-    return c.json({
-      phoneNumberToPay,
-      phoneNumberToContact,
-      paymentQrUrl
-    }, 200);
+    const paymentInfo = await obtainRestaurantPaymentInfo(rid);
+    return c.json(paymentInfo, 200);
   } catch (error) {
+    if (error.message === "\u{1F6A9} Restaurant payment metadata not found") {
+      return c.json({ error: error.message }, 404);
+    }
     console.error(`\u{1F6A8} RESTAURANT PAYMENT ROUTE ERROR: ${error.message}`);
     return c.json({ error: "Internal Server Error" }, 500);
   }
 });
 
+// src/repositories/userRepository.ts
+import { PutCommand as PutCommand4, DeleteCommand as DeleteCommand2 } from "@aws-sdk/lib-dynamodb";
+async function putPreference(userId, prefId, body) {
+  const pk = `USER#${userId}`;
+  const sk = `PREF#${prefId}`;
+  const preferenceItem = {
+    PK: pk,
+    SK: sk,
+    userId,
+    // Redundant but useful for GSIs later
+    prefId,
+    title: body.title,
+    description: body.description,
+    color: body.color,
+    createdAt: body.createdAt ? Number(body.createdAt) : void 0
+    // Maps Kotlin Long timestamp cleanly
+  };
+  await docClient.send(new PutCommand4({
+    TableName: TABLE_NAME,
+    Item: preferenceItem
+  }));
+}
+async function deletePreference(userId, prefId) {
+  const pk = `USER#${userId}`;
+  const sk = `PREF#${prefId}`;
+  await docClient.send(new DeleteCommand2({
+    TableName: TABLE_NAME,
+    Key: { PK: pk, SK: sk }
+  }));
+}
+
+// src/services/userService.ts
+async function saveUserPreference(userId, prefId, body) {
+  await putPreference(userId, prefId, body);
+}
+async function deleteUserPreference(userId, prefId) {
+  await deletePreference(userId, prefId);
+}
+
 // src/routes/users.ts
-import { PutCommand as PutCommand4, DeleteCommand as DeleteCommand2, DynamoDBDocumentClient as DynamoDBDocumentClient4 } from "@aws-sdk/lib-dynamodb";
-var docClient4 = DynamoDBDocumentClient4.from(getDynamoDBClient(), {
-  marshallOptions: { removeUndefinedValues: true }
-});
-var TABLE_NAME5 = "YummiziTable";
 var usersRouter = new Hono2();
 usersRouter.put("/:userId/preferences/:prefId", async (c) => {
   try {
@@ -3800,24 +3811,7 @@ usersRouter.put("/:userId/preferences/:prefId", async (c) => {
       return c.json({ error: "Missing userId or prefId in path" }, 400);
     }
     const body = await c.req.json().catch(() => ({}));
-    const pk = `USER#${user_id}`;
-    const sk = `PREF#${pref_id}`;
-    const preferenceItem = {
-      PK: pk,
-      SK: sk,
-      userId: user_id,
-      // Redundant but useful for GSIs later
-      prefId: pref_id,
-      title: body.title,
-      description: body.description,
-      color: body.color,
-      createdAt: body.createdAt ? Number(body.createdAt) : void 0
-      // Maps Kotlin Long timestamp cleanly
-    };
-    await docClient4.send(new PutCommand4({
-      TableName: TABLE_NAME5,
-      Item: preferenceItem
-    }));
+    await saveUserPreference(user_id, pref_id, body);
     console.log(`\u2705\u{1F64B} The preference ${pref_id} for user ${user_id} was successfully added`);
     return c.json({ message: "Preference saved successfully" }, 200);
   } catch (error) {
@@ -3832,12 +3826,7 @@ usersRouter.delete("/:userId/preferences/:prefId", async (c) => {
     if (!user_id || !pref_id) {
       return c.json({ error: "Missing userId or prefId in path" }, 400);
     }
-    const pk = `USER#${user_id}`;
-    const sk = `PREF#${pref_id}`;
-    await docClient4.send(new DeleteCommand2({
-      TableName: TABLE_NAME5,
-      Key: { PK: pk, SK: sk }
-    }));
+    await deleteUserPreference(user_id, pref_id);
     console.log(`\u2705\u{1F5D1}\uFE0F The preference ${pref_id} of user ${user_id} was successfully deleted`);
     return c.body(null, 204);
   } catch (error) {
@@ -3848,15 +3837,6 @@ usersRouter.delete("/:userId/preferences/:prefId", async (c) => {
 
 // src/repositories/contactRepository.ts
 import { PutCommand as PutCommand5 } from "@aws-sdk/lib-dynamodb";
-
-// src/docClient.ts
-import { DynamoDBDocumentClient as DynamoDBDocumentClient5 } from "@aws-sdk/lib-dynamodb";
-var rawDynamo = getDynamoDBClient();
-var docClient5 = DynamoDBDocumentClient5.from(rawDynamo, {
-  marshallOptions: { removeUndefinedValues: true }
-});
-
-// src/repositories/contactRepository.ts
 async function putFeedback(FeedbackPayload) {
   const newFeedbackItem = {
     PK: `USER#${FeedbackPayload.userId}`,
@@ -3865,7 +3845,7 @@ async function putFeedback(FeedbackPayload) {
     conformDegree: FeedbackPayload.conformDegree,
     description: FeedbackPayload.description
   };
-  await docClient5.send(new PutCommand5({
+  await docClient.send(new PutCommand5({
     TableName: TABLE_NAME,
     Item: newFeedbackItem
   }));
@@ -3879,7 +3859,7 @@ async function putRestaurantContact(restaurantContactPayload) {
     restaurantComment: restaurantContactPayload.restaurantComment
   };
   console.log("\u{1F4BD} Contact Item to save in DynamoDB", JSON.stringify(newFinalContactItem, null, 2));
-  await docClient5.send(new PutCommand5({
+  await docClient.send(new PutCommand5({
     TableName: TABLE_NAME,
     Item: newFinalContactItem
   }));
