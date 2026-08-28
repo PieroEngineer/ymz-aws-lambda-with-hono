@@ -65,7 +65,8 @@ export interface RestaurantInfoResponse {
     restaurantName: string
     logoUrl: string
     latitude: number
-    longitude?: number
+    longitude: number
+    openTime?: string
     closeTime?: string
     dishesToShowUrls: string[]
     phoneNumberToPay: string
