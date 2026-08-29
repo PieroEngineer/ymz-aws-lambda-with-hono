@@ -87,6 +87,9 @@ export interface FeedItem {
     logoUrl: string
     sectionType: string
     dishesToShowUrls: string[]
+    latitude: number
+    longitude: number
+    phoneNumberToContact: string
 }
 
 export interface MenuPage {

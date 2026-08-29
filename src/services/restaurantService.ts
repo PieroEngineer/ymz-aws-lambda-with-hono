@@ -250,7 +250,7 @@ export async function updateRestaurantInfo(
     };
 }
 
-export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]> {
+export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]> { // TODO: Order this
     console.log(`🔎😌  Fetching personalized feed for User: ${userId}`);
 
     console.log(`🔎😌 User ID was fown: ${userId}`);
@@ -314,9 +314,12 @@ export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]
             name: res.name,
             logoUrl: res.logoUrl || "",
             sectionType: sectionMap[rid] || "General",
-            dishesToShowUrls: originalDishes
-            //isOpen // TODO: When the restaurant is reay to open
+            dishesToShowUrls: originalDishes,
+            latitude: res.latitude,
+            longitude: res.longitude,
+            phoneNumberToContact: res.phoneNumberToContact
             //isInitialized // FIXME: Only show restaurants that were initialized
+            //isOpen // TODO: When the restaurant is reay to open
         };
     });
 
