@@ -80,7 +80,7 @@ export interface RequestItemData {
     arrivlaTime: number
 }
 
-export interface RequestItem extends RequestItemData {
+export interface NewRequestItem extends RequestItemData {
     PK: string
     SK: string
 }
@@ -97,6 +97,7 @@ export interface TableRequest {
     state: string,  // TODO: Use a token for this
     specifics: string[],
     arrivlaTime: number,
+    //onRemoveTimeStamp?: number // TODO
 }
 
 export interface RequestCancelClientPayload {

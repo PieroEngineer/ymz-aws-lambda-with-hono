@@ -1,13 +1,13 @@
 import { BatchGetCommand, DeleteCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../docClient";
 import { TABLE_NAME } from "../k";
-import { RequestIdentificatorsPayload, RequestItem, RequestItemData, TableRequest, TableRequestPayload } from "../types/requests";
+import { RequestIdentificatorsPayload, NewRequestItem, RequestItemData, TableRequest, TableRequestPayload } from "../types/requests";
 
 // export async function putRequest(restaurantId: string, requestId: string, requestData: RequestItemData) {
 export async function putRequest(requestPayload: TableRequest) {
     const { restaurantId, requestId, ...requestData } = requestPayload
 
-    const newRequestItem: RequestItem = {
+    const newRequestItem: NewRequestItem = {
         PK: `REST#${restaurantId}`,
         SK: `REQ#${requestId}`,
         ...requestData,
@@ -53,7 +53,7 @@ export async function updateRequestState(restaurantId: string, requestId: string
     const pk = `REST#${restaurantId}`;
     const sk = `REQ#${requestId}`;
 
-    await docClient.send(new UpdateCommand({  // TODO: Include the updating of the acceptance's timestamp too
+    await docClient.send(new UpdateCommand({  // TODO: Include the updating of the event too
         TableName: TABLE_NAME,
         Key: { PK: pk, SK: sk },
         UpdateExpression: "SET #state = :state",

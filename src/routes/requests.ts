@@ -80,6 +80,10 @@ requestsRouter.post("/:requestId/cancel", async (c) => {  /// Perhaps this route
       return c.json({ error: "Missing cancellation actor" }, 400);
     }
 
+    // TODO: Create timestamp for this event
+
+   // await includeCancelTimestampInRequest(requestId, now) 
+
     await cancelRequest(body.restaurantId, requestId);
 
     await transmitRequestCancellation(body, requestId);
@@ -139,7 +143,9 @@ requestsRouter.post("/:restaurantId/update", async (c) => { /// (#1) Analize if 
       return c.json({ error: "Missing restaurantId, requestId, or newState" }, 400);
     }
 
-    const { normalizedState, realtimeNotified } = await updateRequestStatus(restaurantId, body);
+    // TODO: Create timestamp for this event
+
+    const { normalizedState, realtimeNotified } = await updateRequestStatus(restaurantId, body, /*now*/);
 
     console.log(`🔎  The post of the request update finished`);
 

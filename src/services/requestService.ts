@@ -167,7 +167,6 @@ export async function updateRequestStatus(
     let realtimeNotified = false;
 
     if (ablyKeyWS) {
-        //X const channelName = `request:${userId}`;  // In mobile -> "request:$userId"
         console.log(`1️⃣📺  Channel to emit ${channelName}`);
 
         const clientPayload: RequestStatusUpdateClientPayload = {
@@ -175,7 +174,7 @@ export async function updateRequestStatus(
             newStatus: normalizedState,
         };
 
-        realtimeNotified = await transmitViaAbly(
+        realtimeNotified = await transmitViaAbly(  // TODO: Create a another service for this
             channelName!,
             "request-status-updated", /// Consider change Message's name by a code for security 
             clientPayload,
