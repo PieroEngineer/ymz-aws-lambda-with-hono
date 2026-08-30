@@ -5,15 +5,15 @@ import {
     ActiveRequestStatus,
     RequestCancelClientPayload,
     RequestCancelPayload,
-    RequestPayload,
+    TableRequestPayload,
     RequestStatusUpdateClientPayload,
     RequestUpdatePayload,
-    TableRequestPayload,
+    TableRequestResponse,
     RequestIdentificatorsPayload,
+    TableRequest,
 } from "../types/requests";
 
-export async function saveRequest(requestPayload: RequestPayload) {
-    const requestTime = Date.now();
+export async function saveRequest(requestPayload: TableRequestPayload, requestTime: number) {
 
     /// Mocks: They should be passed by the customer's request
     const mockUserSpecifics = ['special day', 'with vehicule'];
@@ -25,7 +25,9 @@ export async function saveRequest(requestPayload: RequestPayload) {
     // TODO: Verify here that the arrival time is less than 20 minutes (or a small time that the restaurant set)
 
     // Base info
-    const baseRequestInfo = {
+    const currentTableRequest: TableRequest = { // TODO: Use a mapper to do this and move it up
+        restaurantId: requestPayload.restaurantId,
+        requestId: requestPayload.requestId,
         userId: requestPayload.userId,
         userName: requestPayload.userName,
         groupSize: requestPayload.groupSize,
@@ -35,16 +37,30 @@ export async function saveRequest(requestPayload: RequestPayload) {
         arrivlaTime: requestPayload.arrivalTime
     };
 
-    await putRequest(requestPayload.restaurantId, requestPayload.requestId, baseRequestInfo);
+    // await putRequest(requestPayload.restaurantId, requestPayload.requestId, baseRequestInfo);
+    await putRequest(currentTableRequest);
 
-    return baseRequestInfo;
+    return currentTableRequest;
 }
 
-export async function transmitTableRequest(restaurantId: string, clientPayload: TableRequestPayload): Promise<boolean> {
-    const channelName = `restaurant:${restaurantId}:ops`;
+export async function transmitTableRequest(requestPayload: TableRequestPayload, requestTime: number): Promise<boolean> {
+    const channelName = `restaurant:${requestPayload.restaurantId}:ops`;
     const requestName = 'table-requested';
 
-    return await transmitViaAbly(channelName, requestName, clientPayload);
+    const mockUserSpecifics = ['special day', 'with vehicule'];
+
+    const requestToTransmit: TableRequestResponse = {
+        requestId: requestPayload.requestId,
+        userId: requestPayload.userId,
+        userName: requestPayload.userName,
+        groupSize: requestPayload.groupSize,
+        onQueuedTimestamp: requestTime,
+        state: "QUEUED",
+        specifics: mockUserSpecifics,
+        arrivlaTime: requestPayload.arrivalTime
+    };
+
+    return await transmitViaAbly(channelName, requestName, requestToTransmit);
 }
 
 export async function cancelRequest(restaurantId: string, requestId: string) {
@@ -93,7 +109,7 @@ export async function transmitRequestCancellation(
     return await transmitViaAbly(channelName!, requestName, clientPayload);
 }
 
-export async function obtainRestaurantRequests(restaurantId: string): Promise<TableRequestPayload[]> {
+export async function obtainRestaurantRequests(restaurantId: string): Promise<TableRequestResponse[]> {
     const rawItems = await queryRequestsByRestaurant(restaurantId);
 
     console.log(`🔍 Raw data to respond the GET request \n${JSON.stringify(rawItems)} \nFor Restaurant: ${restaurantId}`);

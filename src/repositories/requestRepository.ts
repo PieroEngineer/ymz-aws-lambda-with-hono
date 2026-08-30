@@ -1,9 +1,12 @@
 import { BatchGetCommand, DeleteCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../docClient";
 import { TABLE_NAME } from "../k";
-import { RequestIdentificatorsPayload, RequestItem, RequestItemData } from "../types/requests";
+import { RequestIdentificatorsPayload, RequestItem, RequestItemData, TableRequest, TableRequestPayload } from "../types/requests";
 
-export async function putRequest(restaurantId: string, requestId: string, requestData: RequestItemData) {
+// export async function putRequest(restaurantId: string, requestId: string, requestData: RequestItemData) {
+export async function putRequest(requestPayload: TableRequest) {
+    const { restaurantId, requestId, ...requestData } = requestPayload
+
     const newRequestItem: RequestItem = {
         PK: `REST#${restaurantId}`,
         SK: `REQ#${requestId}`,

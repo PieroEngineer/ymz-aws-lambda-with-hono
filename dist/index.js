@@ -3535,7 +3535,6 @@ async function obtainPersonalizedFeed(userId) {
       addedDate: (/* @__PURE__ */ new Date()).toISOString()
     }
   ];
-  console.log("\u{1F50E}\u{1F3EA}  Mock data\n", mockFeedLinks, "\n\u{1F3EA}  seed data\n", feedLinks);
   const sectionMap = {};
   const restaurantIds = [];
   for (const link of mockFeedLinks) {

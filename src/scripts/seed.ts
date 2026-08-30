@@ -65,6 +65,7 @@ async function seedData() {
   }
 
   const logoImageKeys_ = Object.keys(sampleImagesMap).filter(k => k.startsWith("logos/"));
+  // const logoImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("logos/"));
   const foodImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("foods/"));
   const menuImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("menus/"));
   const qrImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("qrs/"));
@@ -78,7 +79,7 @@ async function seedData() {
 
   // 📁 2. READ PREREQUISITE UUID BLUEPRINTS
   const restaurantUuids_: string[] = readJsonFile("my_uuids/restaurant_uuids.json");
-  // const foodUuids: string[] = readJsonFile("my_uuids/food_uuids.json");
+  // const restaurantUuids: string[] = readJsonFile("my_uuids/restaurant_uuids.json");
   const menuUuids: string[] = readJsonFile("my_uuids/menu_uuids.json");
 
   // ✂️ Reducing amount of elements

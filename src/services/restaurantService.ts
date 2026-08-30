@@ -270,7 +270,7 @@ export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]
     // }
 
 
-    // Simulating a user already created with its restaurant in section
+    // Simulating a user already created with its restaurant in section (Use it when "seed" is not used)
     const MOCK_USER_ID = '00000000-0000-4000-a000-000000000000';
     const MOCK_RESTAURANT_ID = '4258e0fa-6b3c-43bc-a6d8-82c5835d608d';
     const mockFeedLinks: Record<string, unknown>[] = [
@@ -281,7 +281,7 @@ export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]
         }
     ];
 
-    console.log('🔎🏪  Mock data\n', mockFeedLinks, '\n🏪  seed data\n', feedLinks);
+    // console.log('🔎🏪  Mock data\n', mockFeedLinks, '\n🏪  seed data\n', feedLinks);
 
     // 3. STEP 2: Hydrate keys to prep for BatchGet
     const sectionMap: Record<string, string> = {}; // Remembers relationship groupings

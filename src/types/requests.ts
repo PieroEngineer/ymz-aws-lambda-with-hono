@@ -1,16 +1,15 @@
-export interface RequestIdentificatorsPayload {
-    restaurantId: string,
-    requestId: string 
-}
 
 // --- Input types ---
 
-export interface RequestPayload{
+export interface TableRequestPayload{
     restaurantId: string
-    userId: string
     requestId: string
-    groupSize: number
+    userId: string
     userName: string
+    groupSize: number
+
+
+
     arrivalTime: number
 }
 
@@ -32,7 +31,8 @@ export interface ActiveRequestsPayload {
 
 // --- Output types ---
 
-export interface TableRequestPayload {
+export interface TableRequestResponse {
+
     requestId: string
     userId: string
     userName: string
@@ -69,6 +69,8 @@ export interface ActiveRequestsResponse {
 // --- Repository types ---
 
 export interface RequestItemData {
+
+
     userId: string
     userName: string
     groupSize: number
@@ -85,6 +87,18 @@ export interface RequestItem extends RequestItemData {
 
 // --- Internal types ---
 
+export interface TableRequest {
+    restaurantId: string,
+    requestId: string,
+    userId: string,
+    userName: string,
+    groupSize: number,
+    onQueuedTimestamp: number,
+    state: string,  // TODO: Use a token for this
+    specifics: string[],
+    arrivlaTime: number,
+}
+
 export interface RequestCancelClientPayload {
     requestId: string
 }
@@ -92,4 +106,9 @@ export interface RequestCancelClientPayload {
 export interface RequestStatusUpdateClientPayload {
     requestId: string
     newStatus: string
+}
+
+export interface RequestIdentificatorsPayload {
+    restaurantId: string,
+    requestId: string 
 }

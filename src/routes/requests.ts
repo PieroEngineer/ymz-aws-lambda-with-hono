@@ -12,7 +12,7 @@ import {
     ActiveRequestsPayload,
     CreateRequestResponse,
     RequestCancelPayload,
-    RequestPayload,
+    TableRequestPayload,
     RequestUpdatePayload,
     UpdateRequestResponse,
 } from "../types/requests.js";
@@ -29,25 +29,20 @@ export const requestsRouter = new Hono();
 requestsRouter.post("/create", async (c) => {
   try {
     // 📩 Parse input payload safely from Hono context body
-    const body: RequestPayload = await c.req.json().catch(() => ({}));
+    const body: TableRequestPayload = await c.req.json().catch(() => ({}));
     console.log(`🔎📦  Data arrived from restaurant ${body.restaurantId} \n${JSON.stringify(body)}`);
 
     if (!body.restaurantId || !body.userId || !body.requestId) {
       return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
     }
 
-    const baseRequestInfo = await saveRequest(body);
+    const requestTime = Date.now();
+
+    const baseRequestInfo = await saveRequest(body, requestTime);  // TODO: Avoid to return this, 
     console.log(`✅📦  Request saved in DynamoDB for restaurant ${body.restaurantId} \n${JSON.stringify(baseRequestInfo)}`);
 
-    // CONSTRUCT TARGET CLIENT INTERFACE PAYLOAD ("TableRequestPayload" shape)  
-    const clientPayload = {
-      requestId: body.requestId,
-
-      ...baseRequestInfo
-    };
-
-    const ablyDispatchSuccess = await transmitTableRequest(body.restaurantId, clientPayload);
-    console.log(`✅📡  Ably dispatch success: ${ablyDispatchSuccess} for restaurant ${body.restaurantId} \n${JSON.stringify(clientPayload)}`);
+    const ablyDispatchSuccess = await transmitTableRequest(body, requestTime);
+    console.log(`✅📡  Ably dispatch success: ${ablyDispatchSuccess} for restaurant ${body.restaurantId}`);
 
     const createRequestResponse: CreateRequestResponse = {
       message: "Request created successfully and broadcast state synchronized",
