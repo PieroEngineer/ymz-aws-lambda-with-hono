@@ -2776,15 +2776,21 @@ var requestsRouter = new Hono2();
 requestsRouter.post("/create", async (c) => {
   try {
     const body = await c.req.json().catch(() => ({}));
+    console.log(`\u{1F50E}\u{1F4E6}  Data arrived from restaurant ${body.restaurantId} 
+${JSON.stringify(body)}`);
     if (!body.restaurantId || !body.userId || !body.requestId) {
       return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
     }
     const baseRequestInfo = await saveRequest(body);
+    console.log(`\u2705\u{1F4E6}  Request saved in DynamoDB for restaurant ${body.restaurantId} 
+${JSON.stringify(baseRequestInfo)}`);
     const clientPayload = {
       requestId: body.requestId,
       ...baseRequestInfo
     };
     const ablyDispatchSuccess = await transmitTableRequest(body.restaurantId, clientPayload);
+    console.log(`\u2705\u{1F4E1}  Ably dispatch success: ${ablyDispatchSuccess} for restaurant ${body.restaurantId} 
+${JSON.stringify(clientPayload)}`);
     const createRequestResponse = {
       message: "Request created successfully and broadcast state synchronized",
       requestId: body.requestId,

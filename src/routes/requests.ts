@@ -30,12 +30,14 @@ requestsRouter.post("/create", async (c) => {
   try {
     // 📩 Parse input payload safely from Hono context body
     const body: RequestPayload = await c.req.json().catch(() => ({}));
+    console.log(`🔎📦  Data arrived from restaurant ${body.restaurantId} \n${JSON.stringify(body)}`);
 
     if (!body.restaurantId || !body.userId || !body.requestId) {
       return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
     }
 
     const baseRequestInfo = await saveRequest(body);
+    console.log(`✅📦  Request saved in DynamoDB for restaurant ${body.restaurantId} \n${JSON.stringify(baseRequestInfo)}`);
 
     // CONSTRUCT TARGET CLIENT INTERFACE PAYLOAD ("TableRequestPayload" shape)  
     const clientPayload = {
@@ -45,6 +47,7 @@ requestsRouter.post("/create", async (c) => {
     };
 
     const ablyDispatchSuccess = await transmitTableRequest(body.restaurantId, clientPayload);
+    console.log(`✅📡  Ably dispatch success: ${ablyDispatchSuccess} for restaurant ${body.restaurantId} \n${JSON.stringify(clientPayload)}`);
 
     const createRequestResponse: CreateRequestResponse = {
       message: "Request created successfully and broadcast state synchronized",
