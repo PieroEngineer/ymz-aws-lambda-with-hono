@@ -2538,7 +2538,7 @@ async function transmitViaAbly(channelName, eventName, dataPayload, maxAttempts 
 }
 
 // src/repositories/requestRepository.ts
-import { BatchGetCommand, DeleteCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { BatchGetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 
 // src/docClient.ts
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
@@ -2585,10 +2585,13 @@ var docClient = DynamoDBDocumentClient.from(rawDynamo, {
 });
 
 // src/repositories/requestRepository.ts
-async function putRequest(restaurantId, requestId, requestData) {
+async function putRequest(requestPayload) {
+  const { restaurantId, requestId, ...requestData } = requestPayload;
   const newRequestItem = {
     PK: `REST#${restaurantId}`,
     SK: `REQ#${requestId}`,
+    GSIPK: `REST#${restaurantId}`,
+    GSISK: `REQ#ACTIVE#${requestId}`,
     ...requestData
   };
   console.log("\u{1F4BD}  Request Item to save in DynamoDB", JSON.stringify(newRequestItem, null, 2), "\nfor restaurant ", restaurantId);
@@ -2597,22 +2600,29 @@ async function putRequest(restaurantId, requestId, requestData) {
     Item: newRequestItem
   }));
 }
-async function deleteRequest(restaurantId, requestId) {
-  const pk = `REST#${restaurantId}`;
-  const sk = `REQ#${requestId}`;
-  await docClient.send(new DeleteCommand({
-    // TODO: This is temporal  code and should be alternated with the commented code that is just above
+async function updateRequestToCancel(restaurantId, requestId) {
+  await docClient.send(new UpdateCommand({
     TableName: TABLE_NAME,
-    Key: { PK: pk, SK: sk }
+    Key: {
+      PK: `REST#${restaurantId}`,
+      SK: `REQ#${requestId}`
+    },
+    UpdateExpression: "REMOVE GSIPK, GSISK",
+    /* TODO SET #status = :status, canceledAt = :ts*/
+    ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK)",
+    ReturnValues: "NONE"
+    // ExpressionAttributeNames: { '#status': 'status' },   // TODO: Include Status and datetime of the event
+    // ExpressionAttributeValues: { ':status': 'canceled', ':ts': now }
   }));
 }
-async function queryRequestsByRestaurant(restaurantId) {
+async function queryActiveRequestsByRestaurant(restaurantId) {
   const queryParams = {
     TableName: TABLE_NAME,
-    KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+    IndexName: GSI_TABLE_NAME,
+    KeyConditionExpression: "GSIPK = :pk AND begins_with(GSISK, :skPrefix)",
     ExpressionAttributeValues: {
       ":pk": `REST#${restaurantId}`,
-      ":skPrefix": "REQ#"
+      ":skPrefix": "REQ#ACTIVE#"
     }
   };
   const dbResult = await docClient.send(new QueryCommand(queryParams));
@@ -2622,7 +2632,7 @@ async function updateRequestState(restaurantId, requestId, normalizedState) {
   const pk = `REST#${restaurantId}`;
   const sk = `REQ#${requestId}`;
   await docClient.send(new UpdateCommand({
-    // TODO: Include the updating of the acceptance's timestamp too
+    // TODO: Include the updating of the event too
     TableName: TABLE_NAME,
     Key: { PK: pk, SK: sk },
     UpdateExpression: "SET #state = :state",
@@ -2652,10 +2662,12 @@ async function batchGetRequests(requestsToUpdate) {
 }
 
 // src/services/requestService.ts
-async function saveRequest(requestPayload) {
-  const requestTime = Date.now();
+async function saveRequest(requestPayload, requestTime) {
   const mockUserSpecifics = ["special day", "with vehicule"];
-  const baseRequestInfo = {
+  const currentTableRequest = {
+    // TODO: Use a mapper to do this and move it up
+    restaurantId: requestPayload.restaurantId,
+    requestId: requestPayload.requestId,
     userId: requestPayload.userId,
     userName: requestPayload.userName,
     groupSize: requestPayload.groupSize,
@@ -2664,16 +2676,27 @@ async function saveRequest(requestPayload) {
     specifics: mockUserSpecifics,
     arrivlaTime: requestPayload.arrivalTime
   };
-  await putRequest(requestPayload.restaurantId, requestPayload.requestId, baseRequestInfo);
-  return baseRequestInfo;
+  await putRequest(currentTableRequest);
+  return currentTableRequest;
 }
-async function transmitTableRequest(restaurantId, clientPayload) {
-  const channelName = `restaurant:${restaurantId}:ops`;
+async function transmitTableRequest(requestPayload, requestTime) {
+  const channelName = `restaurant:${requestPayload.restaurantId}:ops`;
   const requestName = "table-requested";
-  return await transmitViaAbly(channelName, requestName, clientPayload);
+  const mockUserSpecifics = ["special day", "with vehicule"];
+  const requestToTransmit = {
+    requestId: requestPayload.requestId,
+    userId: requestPayload.userId,
+    userName: requestPayload.userName,
+    groupSize: requestPayload.groupSize,
+    onQueuedTimestamp: requestTime,
+    state: "QUEUED",
+    specifics: mockUserSpecifics,
+    arrivlaTime: requestPayload.arrivalTime
+  };
+  return await transmitViaAbly(channelName, requestName, requestToTransmit);
 }
 async function cancelRequest(restaurantId, requestId) {
-  await deleteRequest(restaurantId, requestId);
+  await updateRequestToCancel(restaurantId, requestId);
 }
 async function transmitRequestCancellation(cancelPayload, requestId) {
   const clientPayload = {
@@ -2689,8 +2712,8 @@ async function transmitRequestCancellation(cancelPayload, requestId) {
   const requestName = "request-canceled";
   return await transmitViaAbly(channelName, requestName, clientPayload);
 }
-async function obtainRestaurantRequests(restaurantId) {
-  const rawItems = await queryRequestsByRestaurant(restaurantId);
+async function obtainRestaurantActiveRequests(restaurantId) {
+  const rawItems = await queryActiveRequestsByRestaurant(restaurantId);
   console.log(`\u{1F50D} Raw data to respond the GET request 
 ${JSON.stringify(rawItems)} 
 For Restaurant: ${restaurantId}`);
@@ -2735,6 +2758,7 @@ async function updateRequestStatus(restaurantId, updatePayload) {
       newStatus: normalizedState
     };
     realtimeNotified = await transmitViaAbly(
+      // TODO: Create a another service for this
       channelName,
       "request-status-updated",
       /// Consider change Message's name by a code for security 
@@ -2781,16 +2805,12 @@ ${JSON.stringify(body)}`);
     if (!body.restaurantId || !body.userId || !body.requestId) {
       return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
     }
-    const baseRequestInfo = await saveRequest(body);
+    const requestTime = Date.now();
+    const baseRequestInfo = await saveRequest(body, requestTime);
     console.log(`\u2705\u{1F4E6}  Request saved in DynamoDB for restaurant ${body.restaurantId} 
 ${JSON.stringify(baseRequestInfo)}`);
-    const clientPayload = {
-      requestId: body.requestId,
-      ...baseRequestInfo
-    };
-    const ablyDispatchSuccess = await transmitTableRequest(body.restaurantId, clientPayload);
-    console.log(`\u2705\u{1F4E1}  Ably dispatch success: ${ablyDispatchSuccess} for restaurant ${body.restaurantId} 
-${JSON.stringify(clientPayload)}`);
+    const ablyDispatchSuccess = await transmitTableRequest(body, requestTime);
+    console.log(`\u2705\u{1F4E1}  Ably dispatch success: ${ablyDispatchSuccess} for restaurant ${body.restaurantId}`);
     const createRequestResponse = {
       message: "Request created successfully and broadcast state synchronized",
       requestId: body.requestId,
@@ -2841,7 +2861,7 @@ requestsRouter.get("/:restaurantId", async (c) => {
     if (!rid) {
       return c.json({ error: "Missing restaurantId parameter" }, 400);
     }
-    const mappedPayloads = await obtainRestaurantRequests(rid);
+    const mappedPayloads = await obtainRestaurantActiveRequests(rid);
     return c.json(mappedPayloads, 200);
   } catch (error) {
     console.error(`\u{1F6A8} FETCH ACTIVE REQS ERROR: ${error.message}`);
@@ -2857,7 +2877,11 @@ ${JSON.stringify(body)}`);
     if (!restaurantId || !body.requestId || !body.newState) {
       return c.json({ error: "Missing restaurantId, requestId, or newState" }, 400);
     }
-    const { normalizedState, realtimeNotified } = await updateRequestStatus(restaurantId, body);
+    const { normalizedState, realtimeNotified } = await updateRequestStatus(
+      restaurantId,
+      body
+      /*now*/
+    );
     console.log(`\u{1F50E}  The post of the request update finished`);
     const updateRequestResponse = {
       message: "Request state updated successfully",

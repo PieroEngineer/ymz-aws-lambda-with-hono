@@ -83,6 +83,8 @@ export interface RequestItemData {
 export interface NewRequestItem extends RequestItemData {
     PK: string
     SK: string
+    GSIPK: string
+    GSISK: string
 }
 
 // --- Internal types ---

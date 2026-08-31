@@ -1,6 +1,6 @@
 import { transmitViaAbly } from "../clients/ablyClient";
 import { ablyKeyWS } from "../k";
-import { batchGetRequests, deleteRequest, putRequest, queryRequestsByRestaurant, updateRequestState } from "../repositories/requestRepository";
+import { batchGetRequests, putRequest, queryActiveRequestsByRestaurant, updateRequestState, updateRequestToCancel } from "../repositories/requestRepository";
 import {
     ActiveRequestStatus,
     RequestCancelClientPayload,
@@ -64,24 +64,10 @@ export async function transmitTableRequest(requestPayload: TableRequestPayload, 
 }
 
 export async function cancelRequest(restaurantId: string, requestId: string) {
-    /**
-     * 🛡️ ATOMIC CONDITIONAL UPDATE
-     * 💡 HINT FOR FUTURE STATE-DRIVEN TODO FIX:
-     * To change this condition to rely on your state machine flow instead of timestamp checking,
-     * you can map the ConditionExpression to check against your allowed statuses:
-     * e.g., ConditionExpression: "#stateAttr = :queuedState OR #stateAttr = :processingState"
-     */
-    // await docClient.send(new UpdateCommand({
-    //   TableName: TABLE_NAME,
-    //   Key: { PK: pk, SK: sk },
-    //   UpdateExpression: "SET onCancellationTimestamp = :ts",
-    //   ConditionExpression: "attribute_not_exists(onPaidTimestamp)",
-    //   ExpressionAttributeValues: {
-    //     ":ts": timestamp,
-    //   }
-    // }));
 
-    await deleteRequest(restaurantId, requestId);
+    //X await deleteRequest(restaurantId, requestId);
+
+    await updateRequestToCancel(restaurantId, requestId);
 }
 
 export async function transmitRequestCancellation(
@@ -109,8 +95,8 @@ export async function transmitRequestCancellation(
     return await transmitViaAbly(channelName!, requestName, clientPayload);
 }
 
-export async function obtainRestaurantRequests(restaurantId: string): Promise<TableRequestResponse[]> {
-    const rawItems = await queryRequestsByRestaurant(restaurantId);
+export async function obtainRestaurantActiveRequests(restaurantId: string): Promise<TableRequestResponse[]> {
+    const rawItems = await queryActiveRequestsByRestaurant(restaurantId);
 
     console.log(`🔍 Raw data to respond the GET request \n${JSON.stringify(rawItems)} \nFor Restaurant: ${restaurantId}`);
 

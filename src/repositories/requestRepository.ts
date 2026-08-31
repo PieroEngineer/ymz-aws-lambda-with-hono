@@ -1,6 +1,6 @@
 import { BatchGetCommand, DeleteCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../docClient";
-import { TABLE_NAME } from "../k";
+import { GSI_TABLE_NAME, TABLE_NAME } from "../k";
 import { RequestIdentificatorsPayload, NewRequestItem, RequestItemData, TableRequest, TableRequestPayload } from "../types/requests";
 
 // export async function putRequest(restaurantId: string, requestId: string, requestData: RequestItemData) {
@@ -10,7 +10,11 @@ export async function putRequest(requestPayload: TableRequest) {
     const newRequestItem: NewRequestItem = {
         PK: `REST#${restaurantId}`,
         SK: `REQ#${requestId}`,
-        ...requestData,
+        
+        GSIPK: `REST#${restaurantId}`,
+        GSISK: `REQ#ACTIVE#${requestId}`,
+
+        ...requestData
     };
 
     console.log('💽  Request Item to save in DynamoDB', JSON.stringify(newRequestItem , null, 2), '\nfor restaurant ', restaurantId);
@@ -22,25 +26,43 @@ export async function putRequest(requestPayload: TableRequest) {
     }));
 }
 
-export async function deleteRequest(restaurantId: string, requestId: string) {
-    const pk = `REST#${restaurantId}`;
-    const sk = `REQ#${requestId}`;
+//X
+// export async function deleteRequest(restaurantId: string, requestId: string) {
+//     const pk = `REST#${restaurantId}`;
+//     const sk = `REQ#${requestId}`;
 
-    // TODO: Before removing, verify if the request status is removable.
-    await docClient.send(new DeleteCommand({  // TODO: This is temporal  code and should be alternated with the commented code that is just above
+//     // TODO: Before removing, verify if the request status is removable.
+//     await docClient.send(new DeleteCommand({  // TODO: This is temporal  code and should be alternated with the commented code that is just above
+//         TableName: TABLE_NAME,
+//         Key: { PK: pk, SK: sk },
+//     }));
+// }
+
+export async function updateRequestToCancel(restaurantId: string, requestId: string) {
+
+    await docClient.send( new UpdateCommand({
         TableName: TABLE_NAME,
-        Key: { PK: pk, SK: sk },
-    }));
+        Key: {
+            PK: `REST#${restaurantId}`,
+            SK: `REQ#${requestId}`
+        },
+        UpdateExpression: "REMOVE GSIPK, GSISK",  /* TODO SET #status = :status, canceledAt = :ts*/
+        ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK)",
+        ReturnValues: "NONE",
+        // ExpressionAttributeNames: { '#status': 'status' },   // TODO: Include Status and datetime of the event
+        // ExpressionAttributeValues: { ':status': 'canceled', ':ts': now }
+    }))
 }
 
-export async function queryRequestsByRestaurant(restaurantId: string) {
+export async function queryActiveRequestsByRestaurant(restaurantId: string) {
     // 🔍 1. Query DynamoDB for everything matching this restaurant's requests partition
     const queryParams = {
         TableName: TABLE_NAME,
-        KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+        IndexName: GSI_TABLE_NAME, 
+        KeyConditionExpression: "GSIPK = :pk AND begins_with(GSISK, :skPrefix)",
         ExpressionAttributeValues: {
             ":pk": `REST#${restaurantId}`,
-            ":skPrefix": "REQ#"
+            ":skPrefix": "REQ#ACTIVE#"
         }
     };
 

@@ -15,15 +15,6 @@ import {
     SyncDataFirstResponse,
 } from "../types/restaurants.js";
 
-// FIXME: Use the time fixer for all the routers
-// const serverDate = new Date()
-  
-//   // Formats the server's UTC time to Peru local time (PET)
-//   const peruTime = serverDate.toLocaleString("es-PE", { 
-//     timeZone: "America/Lima",
-//     dateStyle: "short",
-//     timeStyle: "medium"
-//   })
 
 //TODO: Change the URLs by keys, the entire link shouldn't be sent
 

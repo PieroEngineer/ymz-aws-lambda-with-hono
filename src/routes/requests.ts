@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import {
     cancelRequest,
     obtainActiveRequestStatuses,
-    obtainRestaurantRequests,
+    obtainRestaurantActiveRequests,
     saveRequest,
     transmitRequestCancellation,
     transmitTableRequest,
@@ -118,7 +118,7 @@ requestsRouter.get("/:restaurantId", async (c) => {
       return c.json({ error: "Missing restaurantId parameter" }, 400);
     }
 
-    const mappedPayloads = await obtainRestaurantRequests(rid);
+    const mappedPayloads = await obtainRestaurantActiveRequests(rid);
 
     // 🎉 3. Output the compiled collection straight to your frontend
     return c.json(mappedPayloads, 200);
@@ -166,7 +166,7 @@ requestsRouter.post("/:restaurantId/update", async (c) => { /// (#1) Analize if 
 
 // TODO: This handler is only for the MVP, it should be replaced or complemented by reading a GSI table in future updates // Idea for the GSI: the SK could be the status of "ACTIVE", "DELETED", etc
 requestsRouter.post("/active", async (c) => { /// It's accepted to use POST for get data, but it doesn't matter at all because with GSI, we can use GET normally
-
+// This route will help to the customer to get all its active requests in all restaurants
   try {
     // 📩 Parse input payload safely from Hono context body
     const body: ActiveRequestsPayload = await c.req.json().catch(() => ({}));  /// What of these IDs go in the URL?
