@@ -38,7 +38,7 @@ export interface TableRequestResponse {
     userName: string
     groupSize: number
     onQueuedTimestamp: number
-    state: string
+    state: string   // TODO: Create a type token to uniformized this 
     specifics: string[]
     arrivlaTime: number
 }

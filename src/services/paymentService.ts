@@ -1,12 +1,14 @@
 import { transmitViaAbly } from "../clients/ablyClient";
 import { generateS3PresignedUrl } from "../clients/s3Client";
 import { getAllActiveOrders, getSpecificDishesData, putConfirmedOrder, updateOrderToDeactivate } from "../repositories/paymentRepository";
+import { updateRequestToDeactivate } from "../repositories/requestRepository";
 import { OrderItemPayload } from "../types/orders";
 import { ConfirmedOrder, dishPrice, Order } from "../types/payments";
 import { PresignedUrls } from "../types/s3Clients";
 
 export async function saveConfirmedOrder( confirmationEvent:  ConfirmedOrder ){
   await putConfirmedOrder(confirmationEvent)
+  await updateRequestToDeactivate(confirmationEvent.restaurantId, confirmationEvent.requestId)
 }
 
 

@@ -2600,7 +2600,7 @@ async function putRequest(requestPayload) {
     Item: newRequestItem
   }));
 }
-async function updateRequestToCancel(restaurantId, requestId) {
+async function updateRequestToDeactivate(restaurantId, requestId) {
   await docClient.send(new UpdateCommand({
     TableName: TABLE_NAME,
     Key: {
@@ -2695,8 +2695,8 @@ async function transmitTableRequest(requestPayload, requestTime) {
   };
   return await transmitViaAbly(channelName, requestName, requestToTransmit);
 }
-async function cancelRequest(restaurantId, requestId) {
-  await updateRequestToCancel(restaurantId, requestId);
+async function deactivateRequest(restaurantId, requestId) {
+  await updateRequestToDeactivate(restaurantId, requestId);
 }
 async function transmitRequestCancellation(cancelPayload, requestId) {
   const clientPayload = {
@@ -2738,18 +2738,20 @@ For Restaurant: ${restaurantId}`);
 }
 async function updateRequestStatus(restaurantId, updatePayload) {
   const normalizedState = String(updatePayload.newState);
-  await updateRequestState(restaurantId, updatePayload.requestId, normalizedState);
   let channelName;
   switch (normalizedState) {
     case "ACCEPTED":
       channelName = `request:${updatePayload.userId}`;
       break;
     case "READY":
-    // When the user notifies that they want to go to the restaurant
+      break;
     case "PAY_TRIED":
       channelName = `restaurant:${restaurantId}:ops`;
       break;
+    default:
+      throw new Error(`Unsupported request status: ${normalizedState}`);
   }
+  await updateRequestState(restaurantId, updatePayload.requestId, normalizedState);
   let realtimeNotified = false;
   if (ablyKeyWS) {
     console.log(`1\uFE0F\u20E3\u{1F4FA}  Channel to emit ${channelName}`);
@@ -2839,7 +2841,7 @@ requestsRouter.post("/:requestId/cancel", async (c) => {
     if (!body.actor) {
       return c.json({ error: "Missing cancellation actor" }, 400);
     }
-    await cancelRequest(body.restaurantId, requestId);
+    await deactivateRequest(body.restaurantId, requestId);
     await transmitRequestCancellation(body, requestId);
     return c.json({
       message: "Request cancelled successfully"
@@ -3031,6 +3033,7 @@ async function updateOrderToDeactivate(restaurantId, orderId) {
 // src/services/paymentService.ts
 async function saveConfirmedOrder(confirmationEvent) {
   await putConfirmedOrder(confirmationEvent);
+  await updateRequestToDeactivate(confirmationEvent.restaurantId, confirmationEvent.requestId);
 }
 async function obtainAllActiveOrders(restaurantId) {
   return await getAllActiveOrders(restaurantId);

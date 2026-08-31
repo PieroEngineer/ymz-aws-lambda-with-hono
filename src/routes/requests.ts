@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import {
-    cancelRequest,
+    deactivateRequest,
     obtainActiveRequestStatuses,
     obtainRestaurantActiveRequests,
     saveRequest,
@@ -84,7 +84,7 @@ requestsRouter.post("/:requestId/cancel", async (c) => {  /// Perhaps this route
 
    // await includeCancelTimestampInRequest(requestId, now) 
 
-    await cancelRequest(body.restaurantId, requestId);
+    await deactivateRequest(body.restaurantId, requestId);
 
     await transmitRequestCancellation(body, requestId);
 

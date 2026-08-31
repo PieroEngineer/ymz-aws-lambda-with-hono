@@ -1,6 +1,6 @@
 import { transmitViaAbly } from "../clients/ablyClient";
 import { ablyKeyWS } from "../k";
-import { batchGetRequests, putRequest, queryActiveRequestsByRestaurant, updateRequestState, updateRequestToCancel } from "../repositories/requestRepository";
+import { batchGetRequests, putRequest, queryActiveRequestsByRestaurant, updateRequestState, updateRequestToDeactivate } from "../repositories/requestRepository";
 import {
     ActiveRequestStatus,
     RequestCancelClientPayload,
@@ -63,11 +63,8 @@ export async function transmitTableRequest(requestPayload: TableRequestPayload, 
     return await transmitViaAbly(channelName, requestName, requestToTransmit);
 }
 
-export async function cancelRequest(restaurantId: string, requestId: string) {
-
-    //X await deleteRequest(restaurantId, requestId);
-
-    await updateRequestToCancel(restaurantId, requestId);
+export async function deactivateRequest(restaurantId: string, requestId: string) {  // TODO: Since it has different usages, add an extra paramter to know what it's for or the related data to the deactivation
+    await updateRequestToDeactivate(restaurantId, requestId);
 }
 
 export async function transmitRequestCancellation(
@@ -132,8 +129,6 @@ export async function updateRequestStatus(
     // TODO: Check if it's a valid status
     // TODO: Before update, check that the status transition is valid
 
-    await updateRequestState(restaurantId, updatePayload.requestId, normalizedState);
-
     // TODO:
     // 1. Get the active requests of the user and separate them from the current request.
     // 2. Cancel those request in DynamoBD (In MVP, it's deleting them, but then is updating the attribute "onCancelTimestamp") 
@@ -149,6 +144,8 @@ export async function updateRequestStatus(
             channelName = `restaurant:${restaurantId}:ops`;
             break;
     }
+
+    await updateRequestState(restaurantId, updatePayload.requestId, normalizedState);
 
     let realtimeNotified = false;
 

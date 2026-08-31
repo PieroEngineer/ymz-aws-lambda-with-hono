@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { calculateTotalCost, finalizeOrder, obtainAllActiveOrders, obtainPaymentPresignedUrl, obtainSpecificDishesData, saveConfirmedOrder as saveConfirmedOrder, transmitConfirmationToRestaurant } from "../services/paymentService.js"
+import { calculateTotalCost, finalizeOrder, obtainAllActiveOrders, obtainPaymentPresignedUrl, obtainSpecificDishesData, saveConfirmedOrder, transmitConfirmationToRestaurant } from "../services/paymentService.js"
 import { ConfirmedOrder, dishPrice, FinalizeOrderPayload, PaymentConfirmationPayload, PaymentConfirmationResponse } from "../types/payments.js";
 import { PresignedUrls } from "../types/s3Clients.js";
 

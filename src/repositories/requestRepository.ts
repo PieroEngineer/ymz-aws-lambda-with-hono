@@ -38,7 +38,7 @@ export async function putRequest(requestPayload: TableRequest) {
 //     }));
 // }
 
-export async function updateRequestToCancel(restaurantId: string, requestId: string) {
+export async function updateRequestToDeactivate(restaurantId: string, requestId: string) {
 
     await docClient.send( new UpdateCommand({
         TableName: TABLE_NAME,
