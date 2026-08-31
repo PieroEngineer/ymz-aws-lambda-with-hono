@@ -1,5 +1,5 @@
 import { BatchGetCommand, DeleteCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
-import { docClient } from "../docClient";
+import { docClient } from "../clients/docClient";
 import { GSI_TABLE_NAME, TABLE_NAME } from "../k";
 import { RequestIdentificatorsPayload, NewRequestItem, RequestItemData, TableRequest, TableRequestPayload, RequestCancelPayload, BatchCancellationItem, BatchCancellationPayload } from "../types/requests";
 

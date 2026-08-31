@@ -7,7 +7,7 @@ import {
     TransactWriteCommandInput,
     UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { docClient } from "../docClient";
+import { docClient } from "../clients/docClient";
 import { TABLE_NAME } from "../k";
 import { DishSyncInput, MenuPageSyncInput, RestaurantDataToUpdate, RestaurantMetadataData } from "../types/restaurants";
 
@@ -19,7 +19,7 @@ export async function putRestaurantMetadata(restaurantId: string, data: Restaura
             TableName: TABLE_NAME,
             Item: {
                 PK: `REST#${restaurantId}`,
-                SK: "METADATA",
+                SK: "METADATA", // TODO: Include the datetime of creation here or its location
                 ...data // Unpacks and saves all incoming attributes
             }
         })

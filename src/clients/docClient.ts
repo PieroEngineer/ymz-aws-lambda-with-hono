@@ -1,5 +1,5 @@
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { getDynamoDBClient } from "./aws/clientFactory";
+import { getDynamoDBClient } from "../aws/clientFactory";
 
 const rawDynamo = getDynamoDBClient();
 

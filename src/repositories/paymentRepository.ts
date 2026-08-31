@@ -1,4 +1,4 @@
-import { docClient } from "../docClient";
+import { docClient } from "../clients/docClient";
 import { GSI_TABLE_NAME, TABLE_NAME } from "../k";
 import { OrderItemPayload } from "../types/orders";
 import { ConfirmedOrder, ConfirmedOrderItem, dishPrice, dishPricesDbResponse, Order, PaymentConfirmationPayload } from "../types/payments";

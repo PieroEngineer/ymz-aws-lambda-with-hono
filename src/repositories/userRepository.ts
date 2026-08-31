@@ -1,5 +1,5 @@
 import { PutCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
-import { docClient } from "../docClient";
+import { docClient } from "../clients/docClient";
 import { TABLE_NAME } from "../k";
 import { PreferenceItem, PreferencePayload } from "../types/users";
 
