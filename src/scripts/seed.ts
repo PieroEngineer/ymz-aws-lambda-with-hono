@@ -83,8 +83,9 @@ async function seedData() {
   const menuUuids: string[] = readJsonFile("my_uuids/menu_uuids.json");
 
   // ✂️ Reducing amount of elements
-  const logoImageKeys = logoImageKeys_.slice(0, 1);
-  const restaurantUuids = restaurantUuids_.slice(0, 1);
+  const n_restaurants = 2
+  const logoImageKeys = logoImageKeys_.slice(0, n_restaurants);
+  const restaurantUuids = restaurantUuids_.slice(0, n_restaurants);
 
   // 🚨 DATA VALIDATION SAFEGUARDS
   if (menuImageKeys.length !== dishesCoordinates.length) {

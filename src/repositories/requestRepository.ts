@@ -1,7 +1,7 @@
 import { BatchGetCommand, DeleteCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../docClient";
 import { GSI_TABLE_NAME, TABLE_NAME } from "../k";
-import { RequestIdentificatorsPayload, NewRequestItem, RequestItemData, TableRequest, TableRequestPayload } from "../types/requests";
+import { RequestIdentificatorsPayload, NewRequestItem, RequestItemData, TableRequest, TableRequestPayload, RequestCancelPayload, BatchCancellationItem, BatchCancellationPayload } from "../types/requests";
 
 // export async function putRequest(restaurantId: string, requestId: string, requestData: RequestItemData) {
 export async function putRequest(requestPayload: TableRequest) {
@@ -38,7 +38,7 @@ export async function putRequest(requestPayload: TableRequest) {
 //     }));
 // }
 
-export async function updateRequestToDeactivate(restaurantId: string, requestId: string) {
+export async function updateRequestToDeactivate(restaurantId: string, requestId: string) {  // TODO: Include a dyanmic timestamp attribute depending the raeson of the deactivation
 
     await docClient.send( new UpdateCommand({
         TableName: TABLE_NAME,
@@ -86,6 +86,34 @@ export async function updateRequestState(restaurantId: string, requestId: string
             ":state": normalizedState,
         },
     }));
+}
+
+export async function updateBatchRequestsToDeactivate(cancelPayload: BatchCancellationPayload) {
+    
+    const itemsToUpdate = cancelPayload?.requestsToCancel ?? [];
+
+    if (itemsToUpdate.length === 0) {
+        return;
+    }
+
+    await Promise.all(
+        itemsToUpdate
+            .filter(({ restaurantId, requestId }) => Boolean(restaurantId && requestId))
+            .map(async ({ restaurantId, requestId }) => {
+                await docClient.send(
+                    new UpdateCommand({
+                        TableName: TABLE_NAME,
+                        Key: {
+                            PK: `REST#${restaurantId}`,
+                            SK: `REQ#${requestId}`,
+                        },
+                        UpdateExpression: "REMOVE GSIPK, GSISK",
+                        ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK)",
+                        ReturnValues: "NONE",
+                    })
+                );
+            })
+    );
 }
 
 export async function batchGetRequests(requestsToUpdate: RequestIdentificatorsPayload[]) {

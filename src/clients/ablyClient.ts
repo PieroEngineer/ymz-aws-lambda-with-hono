@@ -51,3 +51,34 @@ export async function transmitViaAbly( channelName: string, eventName: string, d
 
     return ablyDispatchSuccess;
 }
+
+export async function transmitBatchPublishingViaAbly(dataPayload:  any ) {
+    try {
+
+        if (!ablyKeyWS) throw new Error("ABLY_API_KEY is not defined");
+        
+        // Ably uses Basic Auth with a Base64-encoded API key
+        const encodedKey = Buffer.from(ablyKeyWS).toString('base64')
+
+        // Single HTTP Round-Trip
+        const response = await fetch('https://rest.ably.io/messages', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Basic ${encodedKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(dataPayload)
+        })
+
+        if (!response.ok) {
+            const errorText = await response.text()
+            throw new Error(`🚩  Ably batch publish failed: ${response.status} ${errorText}`);
+        }
+
+        const data = await response.json()
+        console.warn(`✅  Batch publish response: ${JSON.stringify(data, null, 2)}`);
+
+    } catch (error: any) {
+        throw new Error(`🚩  Failed to transmit batch publishing via Ably: ${error.message}`);
+    }
+}

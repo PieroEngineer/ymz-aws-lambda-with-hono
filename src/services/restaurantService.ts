@@ -271,15 +271,15 @@ export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]
 
 
     // Simulating a user already created with its restaurant in section (Use it when "seed" is not used)
-    const MOCK_USER_ID = '00000000-0000-4000-a000-000000000000';
-    const MOCK_RESTAURANT_ID = '4258e0fa-6b3c-43bc-a6d8-82c5835d608d';
-    const mockFeedLinks: Record<string, unknown>[] = [
-        {
-            PK: `USER#${MOCK_USER_ID}`,
-            SK: `SEC#Popular#${MOCK_RESTAURANT_ID}`,
-            addedDate: new Date().toISOString(),
-        }
-    ];
+    // const MOCK_USER_ID = '00000000-0000-4000-a000-000000000000';
+    // const MOCK_RESTAURANT_ID = '4258e0fa-6b3c-43bc-a6d8-82c5835d608d';
+    // const mockFeedLinks: Record<string, unknown>[] = [
+    //     {
+    //         PK: `USER#${MOCK_USER_ID}`,
+    //         SK: `SEC#Popular#${MOCK_RESTAURANT_ID}`,
+    //         addedDate: new Date().toISOString(),
+    //     }
+    // ];
 
     // console.log('🔎🏪  Mock data\n', mockFeedLinks, '\n🏪  seed data\n', feedLinks);
 
@@ -287,8 +287,8 @@ export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]
     const sectionMap: Record<string, string> = {}; // Remembers relationship groupings
     const restaurantIds: string[] = [];
 
-    // for (const link of feedLinks) {
-    for (const link of mockFeedLinks) {
+    for (const link of feedLinks) {
+    // for (const link of mockFeedLinks) {
         const parts = (link.SK as string).split("#"); // ["SEC", "Popular", "UUID"]
         const sectionName = parts[1];
         const rid = parts[2];

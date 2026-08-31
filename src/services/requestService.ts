@@ -1,6 +1,6 @@
-import { transmitViaAbly } from "../clients/ablyClient";
+import { transmitBatchPublishingViaAbly, transmitViaAbly } from "../clients/ablyClient";
 import { ablyKeyWS } from "../k";
-import { batchGetRequests, putRequest, queryActiveRequestsByRestaurant, updateRequestState, updateRequestToDeactivate } from "../repositories/requestRepository";
+import { batchGetRequests, putRequest, queryActiveRequestsByRestaurant, updateBatchRequestsToDeactivate, updateRequestState, updateRequestToDeactivate } from "../repositories/requestRepository";
 import {
     ActiveRequestStatus,
     RequestCancelClientPayload,
@@ -11,6 +11,8 @@ import {
     TableRequestResponse,
     RequestIdentificatorsPayload,
     TableRequest,
+    BatchCancellationPayload,
+    BatchCancellationItem,
 } from "../types/requests";
 
 export async function saveRequest(requestPayload: TableRequestPayload, requestTime: number) {
@@ -87,9 +89,41 @@ export async function transmitRequestCancellation(
             channelName = `restaurant:${cancelPayload.restaurantId}:ops`;
     }
 
-    const requestName = 'request-canceled';
+    const eventName = 'request-canceled';
 
-    return await transmitViaAbly(channelName!, requestName, clientPayload);
+    return await transmitViaAbly(channelName!, eventName, clientPayload);
+}
+
+export async function deactivateBatchRequests(
+    cancelPayload: BatchCancellationPayload,
+){
+    await updateBatchRequestsToDeactivate(cancelPayload);
+}
+
+export async function transmitBatchRequestCancellation(
+    cancelPayload: BatchCancellationPayload
+) {
+
+    const eventName = 'request-canceled';
+    const batchPayload = cancelPayload.requestsToCancel.map((requestToRemove) => {
+        return {    // TODO: Type this shape for the client
+            // Targets the specific restaurant channel
+            channels: [`restaurant:${requestToRemove.restaurantId}:ops`],
+            // Attaches the custom RequestCancelClientPayload shape
+            messages: [
+                {
+                    name: eventName, // Use your existing eventName variable here
+                    data: {
+                        requestId: requestToRemove.requestId
+                    } as RequestCancelClientPayload
+                }
+            ]
+        };
+    });
+
+    console.log(`🔎📡  Batch cancellation payload to transmit \n${JSON.stringify(batchPayload, null, 2)}`);
+
+    await transmitBatchPublishingViaAbly(batchPayload);
 }
 
 export async function obtainRestaurantActiveRequests(restaurantId: string): Promise<TableRequestResponse[]> {

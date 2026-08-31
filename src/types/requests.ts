@@ -1,9 +1,18 @@
 
 // --- Input types ---
 
-export interface TableRequestPayload{
+export interface BatchCancellationPayload {
+    requestsToCancel: BatchCancellationItem[]
+}
+
+export interface BatchCancellationItem {
     restaurantId: string
     requestId: string
+}
+
+export interface TableRequestPayload{
+    restaurantId: string
+    requestId: string   // TODO: It shouldn't be here because the request ID should be generated here in the backend
     userId: string
     userName: string
     groupSize: number

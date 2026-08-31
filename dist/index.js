@@ -2536,6 +2536,28 @@ async function transmitViaAbly(channelName, eventName, dataPayload, maxAttempts 
   }
   return ablyDispatchSuccess;
 }
+async function transmitBatchPublishingViaAbly(dataPayload) {
+  try {
+    if (!ablyKeyWS) throw new Error("ABLY_API_KEY is not defined");
+    const encodedKey = Buffer.from(ablyKeyWS).toString("base64");
+    const response = await fetch("https://rest.ably.io/messages", {
+      method: "POST",
+      headers: {
+        "Authorization": `Basic ${encodedKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(dataPayload)
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`\u{1F6A9}  Ably batch publish failed: ${response.status} ${errorText}`);
+    }
+    const data = await response.json();
+    console.warn(`\u2705  Batch publish response: ${JSON.stringify(data, null, 2)}`);
+  } catch (error) {
+    throw new Error(`\u{1F6A9}  Failed to transmit batch publishing via Ably: ${error.message}`);
+  }
+}
 
 // src/repositories/requestRepository.ts
 import { BatchGetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
@@ -2644,6 +2666,28 @@ async function updateRequestState(restaurantId, requestId, normalizedState) {
     }
   }));
 }
+async function updateBatchRequestsToDeactivate(cancelPayload) {
+  const itemsToUpdate = cancelPayload?.requestsToCancel ?? [];
+  if (itemsToUpdate.length === 0) {
+    return;
+  }
+  await Promise.all(
+    itemsToUpdate.filter(({ restaurantId, requestId }) => Boolean(restaurantId && requestId)).map(async ({ restaurantId, requestId }) => {
+      await docClient.send(
+        new UpdateCommand({
+          TableName: TABLE_NAME,
+          Key: {
+            PK: `REST#${restaurantId}`,
+            SK: `REQ#${requestId}`
+          },
+          UpdateExpression: "REMOVE GSIPK, GSISK",
+          ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK)",
+          ReturnValues: "NONE"
+        })
+      );
+    })
+  );
+}
 async function batchGetRequests(requestsToUpdate) {
   const formattedKeys = requestsToUpdate.map((item) => ({
     PK: `REST#${item.restaurantId}`,
@@ -2709,8 +2753,34 @@ async function transmitRequestCancellation(cancelPayload, requestId) {
     case "USER":
       channelName = `restaurant:${cancelPayload.restaurantId}:ops`;
   }
-  const requestName = "request-canceled";
-  return await transmitViaAbly(channelName, requestName, clientPayload);
+  const eventName = "request-canceled";
+  return await transmitViaAbly(channelName, eventName, clientPayload);
+}
+async function deactivateBatchRequests(cancelPayload) {
+  await updateBatchRequestsToDeactivate(cancelPayload);
+}
+async function transmitBatchRequestCancellation(cancelPayload) {
+  const eventName = "request-canceled";
+  const batchPayload = cancelPayload.requestsToCancel.map((requestToRemove) => {
+    return {
+      // TODO: Type this shape for the client
+      // Targets the specific restaurant channel
+      channels: [`restaurant:${requestToRemove.restaurantId}:ops`],
+      // Attaches the custom RequestCancelClientPayload shape
+      messages: [
+        {
+          name: eventName,
+          // Use your existing eventName variable here
+          data: {
+            requestId: requestToRemove.requestId
+          }
+        }
+      ]
+    };
+  });
+  console.log(`\u{1F50E}\u{1F4E1}  Batch cancellation payload to transmit 
+${JSON.stringify(batchPayload, null, 2)}`);
+  await transmitBatchPublishingViaAbly(batchPayload);
 }
 async function obtainRestaurantActiveRequests(restaurantId) {
   const rawItems = await queryActiveRequestsByRestaurant(restaurantId);
@@ -2744,12 +2814,10 @@ async function updateRequestStatus(restaurantId, updatePayload) {
       channelName = `request:${updatePayload.userId}`;
       break;
     case "READY":
-      break;
+    // When the user notifies that they want to go to the restaurant
     case "PAY_TRIED":
       channelName = `restaurant:${restaurantId}:ops`;
       break;
-    default:
-      throw new Error(`Unsupported request status: ${normalizedState}`);
   }
   await updateRequestState(restaurantId, updatePayload.requestId, normalizedState);
   let realtimeNotified = false;
@@ -2807,6 +2875,7 @@ ${JSON.stringify(body)}`);
     if (!body.restaurantId || !body.userId || !body.requestId) {
       return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
     }
+    console.log(`\u{1F50E}  Validated request payload for request ${body.requestId}`);
     const requestTime = Date.now();
     const baseRequestInfo = await saveRequest(body, requestTime);
     console.log(`\u2705\u{1F4E6}  Request saved in DynamoDB for restaurant ${body.restaurantId} 
@@ -2857,6 +2926,24 @@ requestsRouter.post("/:requestId/cancel", async (c) => {
     return c.json({ error: "Internal Server Error" }, 500);
   }
 });
+requestsRouter.post("/cancel", async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.requestsToCancel || body.requestsToCancel.length === 0) {
+      return c.json({ error: "Missing cancellations array" }, 400);
+    }
+    await deactivateBatchRequests(body);
+    console.log(`\u2705  Batch cancellation processed successfully`);
+    await transmitBatchRequestCancellation(body);
+    console.log(`\u2705  Batch cancellation transmitted successfully`);
+    return c.json({
+      message: "Batch cancellation processed successfully"
+    }, 200);
+  } catch (error) {
+    console.error(`\u{1F6A8} BATCH CANCELLATION ERROR: ${error.message}`);
+    return c.json({ error: "Internal Server Error" }, 500);
+  }
+});
 requestsRouter.get("/:restaurantId", async (c) => {
   try {
     const rid = c.req.param("restaurantId");
@@ -2888,6 +2975,7 @@ ${JSON.stringify(body)}`);
     const updateRequestResponse = {
       message: "Request state updated successfully",
       restaurantId,
+      // TODO: Are these bellow attributes  necessary?
       requestId: body.requestId,
       newState: normalizedState,
       realtimeNotified
@@ -3553,18 +3641,9 @@ async function obtainPersonalizedFeed(userId) {
   console.log(`\u{1F50E}\u{1F60C}  Fetching personalized feed for User: ${userId}`);
   console.log(`\u{1F50E}\u{1F60C} User ID was fown: ${userId}`);
   const feedLinks = await queryUserFeedLinks(userId);
-  const MOCK_USER_ID = "00000000-0000-4000-a000-000000000000";
-  const MOCK_RESTAURANT_ID = "4258e0fa-6b3c-43bc-a6d8-82c5835d608d";
-  const mockFeedLinks = [
-    {
-      PK: `USER#${MOCK_USER_ID}`,
-      SK: `SEC#Popular#${MOCK_RESTAURANT_ID}`,
-      addedDate: (/* @__PURE__ */ new Date()).toISOString()
-    }
-  ];
   const sectionMap = {};
   const restaurantIds = [];
-  for (const link of mockFeedLinks) {
+  for (const link of feedLinks) {
     const parts = link.SK.split("#");
     const sectionName = parts[1];
     const rid = parts[2];

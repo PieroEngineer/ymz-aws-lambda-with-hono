@@ -1,9 +1,11 @@
 import { Hono } from "hono";
 import {
+    deactivateBatchRequests,
     deactivateRequest,
     obtainActiveRequestStatuses,
     obtainRestaurantActiveRequests,
     saveRequest,
+    transmitBatchRequestCancellation,
     transmitRequestCancellation,
     transmitTableRequest,
     updateRequestStatus,
@@ -15,6 +17,7 @@ import {
     TableRequestPayload,
     RequestUpdatePayload,
     UpdateRequestResponse,
+    BatchCancellationPayload,
 } from "../types/requests.js";
 
 // 📦 Create an isolated, modular sub-router for /requests routes
@@ -32,9 +35,11 @@ requestsRouter.post("/create", async (c) => {
     const body: TableRequestPayload = await c.req.json().catch(() => ({}));
     console.log(`🔎📦  Data arrived from restaurant ${body.restaurantId} \n${JSON.stringify(body)}`);
 
-    if (!body.restaurantId || !body.userId || !body.requestId) {
+    if (!body.restaurantId || !body.userId || !body.requestId) {   // TODO: The request ID shouldn't be here because the request ID should be generated here in the backend
       return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
     }
+
+    console.log(`🔎  Validated request payload for request ${body.requestId}`);
 
     const requestTime = Date.now();
 
@@ -82,7 +87,6 @@ requestsRouter.post("/:requestId/cancel", async (c) => {  /// Perhaps this route
 
     // TODO: Create timestamp for this event
 
-   // await includeCancelTimestampInRequest(requestId, now) 
 
     await deactivateRequest(body.restaurantId, requestId);
 
@@ -105,6 +109,33 @@ requestsRouter.post("/:requestId/cancel", async (c) => {  /// Perhaps this route
     return c.json({ error: "Internal Server Error" }, 500);
   }
 });
+
+requestsRouter.post( "/cancel",async (c) => {
+  try{
+    const body: BatchCancellationPayload = await c.req.json().catch(() => ({}));
+
+    if (!body.requestsToCancel || body.requestsToCancel.length === 0) {
+      return c.json({ error: "Missing cancellations array" }, 400);
+    }
+
+    // TODO: Check if the amount of cancellable items is not huge
+
+    await deactivateBatchRequests(body);
+    console.log(`✅  Batch cancellation processed successfully`);
+
+    await transmitBatchRequestCancellation(body);
+    console.log(`✅  Batch cancellation transmitted successfully`);
+
+    return c.json({
+      message: "Batch cancellation processed successfully",
+    }, 200);
+
+  }
+  catch (error: any) {
+    console.error(`🚨 BATCH CANCELLATION ERROR: ${error.message}`);
+    return c.json({ error: "Internal Server Error" }, 500);
+  }
+})
 
 /**
  * 🛰️ ROUTE: Fetch all active requests for a specific restaurant
@@ -151,7 +182,7 @@ requestsRouter.post("/:restaurantId/update", async (c) => { /// (#1) Analize if 
 
     const updateRequestResponse: UpdateRequestResponse = {
       message: "Request state updated successfully",
-      restaurantId,
+      restaurantId, // TODO: Are these bellow attributes  necessary?
       requestId: body.requestId,
       newState: normalizedState,
       realtimeNotified,
