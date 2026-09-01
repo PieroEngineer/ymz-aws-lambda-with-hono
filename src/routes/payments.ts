@@ -5,8 +5,6 @@ import { PresignedUrls } from "../types/s3Clients.js";
 
 export const paymentsRouter = new Hono(); // TODO: Rename this feature from "payment" to "order"
 
-export const TABLE_NAME = "YummiziTable";
-
 paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every router and move become them more abstract
   try {
     // 📩 Parse input payload safely from Hono context body

@@ -3,10 +3,11 @@ import * as path from "path";
 import { PutCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getS3Client, getDynamoDBClient } from "../aws/clientFactory.js";
+import { TABLE_NAME } from "../k.js";
 
 /// ⚙️ CONFIGURATION CONSTANTS
 const BUCKET_NAME = "restaurant-assets";
-const TABLE_NAME = "YummiziTable";
+// const TABLE_NAME = "YummiziTable";
 const MOCK_USER_ID = "00000000-0000-4000-a000-000000000000";
 const SECTIONS = ["Closest", "Popular", "FriendsFav", "Newest"];
 
@@ -64,8 +65,8 @@ async function seedData() {
     }
   }
 
-  const logoImageKeys_ = Object.keys(sampleImagesMap).filter(k => k.startsWith("logos/"));
-  // const logoImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("logos/"));
+  // const logoImageKeys_ = Object.keys(sampleImagesMap).filter(k => k.startsWith("logos/"));
+  const logoImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("logos/"));
   const foodImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("foods/"));
   const menuImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("menus/"));
   const qrImageKeys = Object.keys(sampleImagesMap).filter(k => k.startsWith("qrs/"));
@@ -78,14 +79,14 @@ async function seedData() {
   ];
 
   // 📁 2. READ PREREQUISITE UUID BLUEPRINTS
-  const restaurantUuids_: string[] = readJsonFile("my_uuids/restaurant_uuids.json");
-  // const restaurantUuids: string[] = readJsonFile("my_uuids/restaurant_uuids.json");
+  // const restaurantUuids_: string[] = readJsonFile("my_uuids/restaurant_uuids.json");
+  const restaurantUuids: string[] = readJsonFile("my_uuids/restaurant_uuids.json");
   const menuUuids: string[] = readJsonFile("my_uuids/menu_uuids.json");
 
   // ✂️ Reducing amount of elements
-  const n_restaurants = 2
-  const logoImageKeys = logoImageKeys_.slice(0, n_restaurants);
-  const restaurantUuids = restaurantUuids_.slice(0, n_restaurants);
+  // const n_restaurants = 2
+  // const logoImageKeys = logoImageKeys_.slice(0, n_restaurants);
+  // const restaurantUuids = restaurantUuids_.slice(0, n_restaurants);
 
   // 🚨 DATA VALIDATION SAFEGUARDS
   if (menuImageKeys.length !== dishesCoordinates.length) {
@@ -203,22 +204,25 @@ async function seedData() {
         paymentQrUrl: qrUrl,
         isOpen: true,
         isInitialized: true,
+
+        GSI2PK: 'RMETADATA',
+        GSI2SK: `REST#${rid}`
       }
     }));
 
     // 🔗 6. USER FEED GRAPH RELATION LINK
-    const targetSection = getRandomItem(SECTIONS);
-    await docClient.send(new PutCommand({
-      TableName: TABLE_NAME,
-      Item: {
-        PK: `USER#${MOCK_USER_ID}`,
-        SK: `SEC#${targetSection}#${rid}`,
-        // SK: `SEC#Popular#${rid}`,
-        addedDate: new Date().toISOString(),
-      }
-    }));
+    // const targetSection = getRandomItem(SECTIONS);
+    // await docClient.send(new PutCommand({
+    //   TableName: TABLE_NAME,
+    //   Item: {
+    //     PK: `USER#${MOCK_USER_ID}`,
+    //     SK: `SEC#${targetSection}#${rid}`,
+    //     // SK: `SEC#Popular#${rid}`,
+    //     addedDate: new Date().toISOString(),
+    //   }
+    // }));
 
-    console.log(`🏪 Restaurant Gourmet Hub ${i} (${logoImageUrl}) indexed into User Section -> [${targetSection}]\n`);
+    // console.log(`🏪 Restaurant Gourmet Hub ${i} (${logoImageUrl}) indexed into User Section -> [${targetSection}]\n`);
   }
 
   console.log("-----------------------------------------------------------");

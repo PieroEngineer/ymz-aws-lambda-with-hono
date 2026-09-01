@@ -8,8 +8,8 @@ import {
     UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../clients/docClient";
-import { TABLE_NAME } from "../k";
-import { DishSyncInput, MenuPageSyncInput, RestaurantDataToUpdate, RestaurantMetadataData } from "../types/restaurants";
+import { GSI2_TABLE_NAME, GSI_TABLE_NAME, TABLE_NAME } from "../k";
+import { DishSyncInput, RestaurantDataToUpdate, RestaurantMetadataData, TemporalFeedRestaurant } from "../types/restaurants";
 
 type TransactItem = NonNullable<TransactWriteCommandInput["TransactItems"]>[number];
 
@@ -79,6 +79,30 @@ export async function queryUserFeedLinks(userId: string) {
     }));
 
     return feedLinksResponse.Items || [];
+}
+
+export async function getTemporalRestaurantFeed(): Promise<TemporalFeedRestaurant[]> {
+    const command = new QueryCommand({
+        TableName: TABLE_NAME,
+        IndexName: GSI2_TABLE_NAME,
+        KeyConditionExpression: '#gsiPk = :gsiPkValue',
+        ExpressionAttributeNames: {
+            '#gsiPk': 'GSI2PK'
+        },
+        ExpressionAttributeValues: {
+            ':gsiPkValue': 'RMETADATA'
+        }
+    });
+
+    const response = await docClient.send(command);
+    const items = (response.Items ?? []) as Array<{
+        GSI2PK?: string;
+        GSI2SK?: string;
+    }>;
+
+    return items.map((item) => ({
+        restaurantId: item.GSI2SK?.replace('REST#', '') ?? ""
+    }));
 }
 
 export async function batchGetRestaurantMetadata(restaurantIds: string[]) {

@@ -39,7 +39,7 @@ export const getDynamoDBClient = (): DynamoDBClient => {
       endpoint: localstackUrl,
       region: awsRegion,
       credentials: {
-        accessKeyId: "test",
+        accessKeyId: "test",  // FIXME: Do I need to change these "test"s?
         secretAccessKey: "test",
       },
     });

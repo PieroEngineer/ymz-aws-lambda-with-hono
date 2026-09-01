@@ -10,6 +10,7 @@ import {
     executeMenuTransaction,
     getRestaurantMetadata,
     getRestaurantPaymentMetadata,
+    getTemporalRestaurantFeed,
     putRestaurantMetadata,
     queryRestaurantMenuResources,
     queryUserFeedLinks,
@@ -95,6 +96,9 @@ export async function initializeRestaurantInfo(
         paymentQrUrl: qrPresigned.publicUrl,
         isOpen: true, //true
         isInitialized: true,
+
+        GSI2PK: 'RMETADATA',
+        GSI2SK: `REST#${restaurantId}`
     };
 
     console.log(`🔎🏪  Initialize restaurant info whose ID is ${restaurantId}\n`, JSON.stringify(dataToUpload, null, 2));
@@ -262,7 +266,9 @@ export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]
     //   : `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION || "us-east-1"}.amazonaws.com`;
 
     // 2. STEP 1: Find the Section relation pointer records (SEC# rows)
-    const feedLinks = await queryUserFeedLinks(userId);
+    // const feedLinks = await queryUserFeedLinks(userId);
+
+    const temporalFeedLinks = await getTemporalRestaurantFeed()
 
     ///
     // if (feedLinks.length === 0) {
@@ -284,21 +290,27 @@ export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]
     // console.log('🔎🏪  Mock data\n', mockFeedLinks, '\n🏪  seed data\n', feedLinks);
 
     // 3. STEP 2: Hydrate keys to prep for BatchGet
-    const sectionMap: Record<string, string> = {}; // Remembers relationship groupings
-    const restaurantIds: string[] = [];
+    // const sectionMap: Record<string, string> = {}; // Remembers relationship groupings
+    // const restaurantIds: string[] = [];
 
-    for (const link of feedLinks) {
-    // for (const link of mockFeedLinks) {
-        const parts = (link.SK as string).split("#"); // ["SEC", "Popular", "UUID"]
-        const sectionName = parts[1];
-        const rid = parts[2];
+    // for (const link of feedLinks) {
+    // // for (const link of mockFeedLinks) {
+    //     const parts = (link.SK as string).split("#"); // ["SEC", "Popular", "UUID"]
+    //     const sectionName = parts[1];
+    //     const rid = parts[2];
 
-        restaurantIds.push(rid);
-        sectionMap[rid] = sectionName;
-    }
+    //     restaurantIds.push(rid);
+    //     sectionMap[rid] = sectionName;
+    // }
+
+    // console.log(`🔎🏪  restaurantIds: ${JSON.stringify(restaurantIds, null, 2)}`);
+    // console.log(`🔎🏪  sectionMap: ${JSON.stringify(sectionMap, null, 2)}`);
+
+    const restaurantIds = temporalFeedLinks.map( (feedRestaurant) =>{
+        return feedRestaurant.restaurantId
+    })
 
     console.log(`🔎🏪  restaurantIds: ${JSON.stringify(restaurantIds, null, 2)}`);
-    console.log(`🔎🏪  sectionMap: ${JSON.stringify(sectionMap, null, 2)}`);
 
     const rawRestaurants = await batchGetRestaurantMetadata(restaurantIds);
 
@@ -313,7 +325,8 @@ export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]
             id: rid,
             name: res.name,
             logoUrl: res.logoUrl || "",
-            sectionType: sectionMap[rid] || "General",
+            // sectionType: sectionMap[rid] || "General",
+            sectionType: "Primeros restaurantes",
             dishesToShowUrls: originalDishes,
             latitude: res.latitude,
             longitude: res.longitude,

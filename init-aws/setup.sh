@@ -3,6 +3,7 @@
 # 1. Configuration Constants
 TABLE_NAME="YummiziTable"
 GSI_TABLE_NAME="YummiziGsiTable"
+GSI2_TABLE_NAME="YummiziGsi2Table"
 BUCKET_NAME="restaurant-assets"
 REGION="us-east-1"
 STAGE="prod"
@@ -20,6 +21,8 @@ awslocal dynamodb create-table \
         AttributeName=SK,AttributeType=S \
         AttributeName=GSIPK,AttributeType=S \
         AttributeName=GSISK,AttributeType=S \
+        AttributeName=GSI2PK,AttributeType=S \
+        AttributeName=GSI2SK,AttributeType=S \
     --key-schema \
         AttributeName=PK,KeyType=HASH \
         AttributeName=SK,KeyType=RANGE \
@@ -33,6 +36,16 @@ awslocal dynamodb create-table \
                 ],
                 \"Projection\": {
                     \"ProjectionType\": \"ALL\"
+                }
+            },
+            {
+                \"IndexName\": \"$GSI2_TABLE_NAME\",
+                \"KeySchema\": [
+                    {\"AttributeName\": \"GSI2PK\", \"KeyType\": \"HASH\"},
+                    {\"AttributeName\": \"GSI2SK\", \"KeyType\": \"RANGE\"}
+                ],
+                \"Projection\": {
+                    \"ProjectionType\": \"KEYS_ONLY\"
                 }
             }
         ]" \
