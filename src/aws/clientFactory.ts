@@ -2,9 +2,9 @@ import { S3Client } from "@aws-sdk/client-s3";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
 // 🔥 IMPORTANT: Detect if we are targeting local environment or live cloud
-const isLocal = process.env.NODE_ENV === "development" || !!process.env.LOCALSTACK_ENDPOINT;
+export const isLocal = process.env.NODE_ENV === "development" || !!process.env.LOCALSTACK_ENDPOINT;
 
-const awsRegion = process.env.AWS_REGION || "us-east-1";
+const awsRegion = "us-east-1";
 const localstackUrl = "http://localhost:4566"// || process.env.LOCALSTACK_ENDPOINT ;
 
 /**
@@ -27,7 +27,7 @@ export const getS3Client = (): S3Client => {
   }
 
   // 🚀 LIVE AWS: In production, AWS natively handles IAM roles and routing
-  return new S3Client({ region: awsRegion });
+  return new S3Client({ });
 };
 
 /**
@@ -45,5 +45,5 @@ export const getDynamoDBClient = (): DynamoDBClient => {
     });
   }
 
-  return new DynamoDBClient({ region: awsRegion });
+  return new DynamoDBClient({ });
 };

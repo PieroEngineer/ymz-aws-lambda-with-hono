@@ -13,7 +13,6 @@ import {
     getTemporalRestaurantFeed,
     putRestaurantMetadata,
     queryRestaurantMenuResources,
-    queryUserFeedLinks,
     updateRestaurantMetadata,
 } from "../repositories/restaurantRepository";
 import {
@@ -259,12 +258,6 @@ export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]
 
     console.log(`🔎😌 User ID was fown: ${userId}`);
 
-    // 🗺️ DYNAMIC S3 RESOLUTION: Switches seamlessly between LocalStack and AWS Cloud grids
-    // const isLocal = process.env.NODE_ENV === "development" || !!process.env.LOCALSTACK_ENDPOINT;
-    // const s3BaseUrl = isLocal 
-    //   ? `http://localhost:4566/${BUCKET_NAME}`
-    //   : `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION || "us-east-1"}.amazonaws.com`;
-
     // 2. STEP 1: Find the Section relation pointer records (SEC# rows)
     // const feedLinks = await queryUserFeedLinks(userId);
 
@@ -343,11 +336,6 @@ export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]
 }
 
 export async function obtainRestaurantMenu(restaurantId: string): Promise<MenuResponse> {
-    // 🗺️ DYNAMIC S3 RESOLUTION: Matches development environments vs production targets
-    // const isLocal = process.env.NODE_ENV === "development" || !!process.env.LOCALSTACK_ENDPOINT;
-    // const s3BaseUrl = isLocal 
-    //   ? `http://localhost:4566/${BUCKET_NAME}`
-    //   : `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION || "us-east-1"}.amazonaws.com`;
 
     const items = await queryRestaurantMenuResources(restaurantId);
 
@@ -412,12 +400,6 @@ export async function synchronizeRestaurantMenu(
     const transactionItems: TransactItem[] = [];
 
     const presignedUrls: PresignedUrlMapping[] = [];
-
-    // Resolve structural patterns targeting local environments vs live AWS
-    // const isLocal = process.env.NODE_ENV === "development" || !!process.env.LOCALSTACK_ENDPOINT;
-    // const s3BaseUrl = isLocal 
-    //   ? `http://localhost:4566/${BUCKET_NAME}`
-    //   : `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION || "us-east-1"}.amazonaws.com`;
 
     console.log(`🔎📃  Pages received:\n${JSON.stringify(menuPages, null, 2)}`);
 
