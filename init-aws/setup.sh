@@ -2,8 +2,8 @@
 
 # 1. Configuration Constants
 TABLE_NAME="YummiziTable"
-GSI_TABLE_NAME="YummiziGsiTable"
-GSI2_TABLE_NAME="YummiziGsi2Table"
+GSI_TABLE_NAME="YummiziGsiTable"    # For active requests
+GSI2_TABLE_NAME="YummiziGsi2Table"  # For the feed restaurants
 BUCKET_NAME="restaurant-assets"
 REGION="us-east-1"
 STAGE="prod"

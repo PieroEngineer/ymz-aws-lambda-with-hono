@@ -10,16 +10,30 @@ import { contactsRouter } from "./routes/contacts.js";
 // Initialize the root Hono platform application
 const app = new Hono();
 
+// Environment-aware origin verification
+const ALLOWED_ORIGINS = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  process.env.FRONTEND_URL || "" // Dynamically set in SAM template
+];
+
 // 🔓 2. Enable CORS globally before your routes
 // This allows your web app running on ANY local port to talk to your API
 app.use(
   "/*",
   cors({
-    origin: (origin) => (origin.includes("localhost") ? origin : null), // Dynamically allows any local port (3000, 5173, etc.)
+    origin: (origin) => {
+      if (!origin) return ALLOWED_ORIGINS[0]; // Allow non-browser callers (Postman, mobile native)
+      if (origin.includes("localhost") || ALLOWED_ORIGINS.includes(origin)) {
+        return origin;
+      }
+      return null;
+    },
     allowHeaders: ["Content-Type", "Authorization"],
-    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],  // TODO: Should I include "PATCH"?
+    // YES: Always include PATCH for RESTful partial updates (e.g., updating partial user profiles)
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], 
     exposeHeaders: ["Content-Length"],
-    maxAge: 600,
+    maxAge: 86400, // 24 hours (Reduces preflight OPTIONS requests)
     credentials: true,
   })
 );
@@ -53,25 +67,5 @@ app.get("/", (c) => {
  * into standard Hono requests and responses perfectly.
  */
 export const handler = handle(app);
-
-/**
- * 💻 STANDALONE NODE SERVER ENGINE (Local Development Sandbox)
- * Runs your backend on http://localhost:3000 when you execute `npm run dev`.
- * It automatically bypasses the Lambda simulator overhead for instant console logs.
- */
-if (process.env.NODE_ENV === "development" && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
-  import("@hono/node-server").then(({ serve }) => {
-    const port = 3000;
-    console.log(`\n=================================================`);
-    console.log(`🏃‍♂️ Yummizi Engine listening on http://localhost:${port}`);
-    console.log(`💡 Standalone mode active: testing routes is super fast!`);
-    console.log(`=================================================\n`);
-    
-    serve({
-      fetch: app.fetch,
-      port: port
-    });
-  });
-}
 
 export default app;

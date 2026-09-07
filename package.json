@@ -1,18 +1,19 @@
 {
   "name": "ymz_be_hono",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Yummizi Engine Backend API",
+  "type": "module",
+  "main": "src/index.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "cross-env LOCALSTACK_ENDPOINT=http://localhost:4566 NODE_ENV=development tsx watch src/index.ts",
+    "dev": "cross-env LOCALSTACK_ENDPOINT=http://localhost:4566 NODE_ENV=development tsx watch src/server.dev.ts",
     "seed": "cross-env LOCALSTACK_ENDPOINT=http://localhost:4566 tsx src/scripts/seed.ts",
-    "deploy:local": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js --external:@aws-sdk/* --external:@hono/node-server && echo {\"type\":\"module\"} > dist\\package.json && cd dist && tar -a -c -f handler.zip index.js package.json && docker cp handler.zip localstack_yummizi:/tmp/handler.zip && docker exec localstack_yummizi awslocal lambda update-function-code --function-name YummiziHonoBackend --zip-file fileb:///tmp/handler.zip && del handler.zip && del package.json"
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node24 --format=esm --outfile=dist/index.js --external:@aws-sdk/* --external:@hono/node-server",
+    "deploy:local": "npm run build && cd dist && zip -r handler.zip index.js && docker cp handler.zip localstack_yummizi:/tmp/handler.zip && docker exec localstack_yummizi awslocal lambda update-function-code --function-name YummiziHonoBackend --zip-file fileb:///tmp/handler.zip"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1063.0",
     "@aws-sdk/client-s3": "^3.1068.0",

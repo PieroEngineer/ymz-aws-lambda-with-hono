@@ -8,7 +8,7 @@ import {
     UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../clients/docClient";
-import { GSI2_TABLE_NAME, GSI_TABLE_NAME, TABLE_NAME } from "../k";
+import { GSI2_TABLE_NAME, TABLE_NAME } from "../k";
 import { DishSyncInput, RestaurantDataToUpdate, RestaurantMetadataData, TemporalFeedRestaurant } from "../types/restaurants";
 
 type TransactItem = NonNullable<TransactWriteCommandInput["TransactItems"]>[number];
@@ -113,7 +113,7 @@ export async function batchGetRestaurantMetadata(restaurantIds: string[]) {
         RequestItems: {
             [TABLE_NAME]: {
                 Keys: restaurantKeys,
-                // ConsistentRead: false, // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB) /// FIXME: Necessary here? // Consistent read is used when the read is just after a writting
+                ConsistentRead: false, // CRITICAL: Keeps cost at 0.5 RCU per item (<4KB)
             }
         }
     }));
