@@ -1,10 +1,10 @@
-import { transmitViaAbly } from "../clients/ablyClient";
-import { generateS3PresignedUrl } from "../clients/s3Client";
-import { getAllActiveOrders, getSpecificDishesData, putConfirmedOrder, updateOrderToDeactivate } from "../repositories/paymentRepository";
-import { updateRequestToDeactivate } from "../repositories/requestRepository";
-import { OrderItemPayload } from "../types/orders";
-import { ConfirmedOrder, dishPrice, Order } from "../types/payments";
-import { PresignedUrls } from "../types/s3Clients";
+import { transmitViaAbly } from "../clients/ablyClient.js";
+import { generateS3PresignedUrl } from "../clients/s3Client.js";
+import { getAllActiveOrders, getSpecificDishesData, putConfirmedOrder, updateOrderToDeactivate } from "../repositories/paymentRepository.js";
+import { updateRequestToDeactivate } from "../repositories/requestRepository.js";
+import { OrderItemPayload } from "../types/orders.js";
+import { ConfirmedOrder, dishPrice, Order } from "../types/payments.js";
+import { PresignedUrls } from "../types/s3Clients.js";
 
 export async function saveConfirmedOrder( confirmationEvent:  ConfirmedOrder ){
   await putConfirmedOrder(confirmationEvent)

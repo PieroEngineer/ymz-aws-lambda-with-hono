@@ -1,7 +1,7 @@
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
-import { docClient } from "../clients/docClient";
-import { TABLE_NAME } from "../k";
-import { FeedbackItem, FeedbackPayload, RestaurantContactPayload } from "../types/contacts";
+import { docClient } from "../clients/docClient.js";
+import { TABLE_NAME } from "../k.js";
+import { FeedbackItem, FeedbackPayload, RestaurantContactPayload } from "../types/contacts.js";
 
 export async function putFeedback(FeedbackPayload: FeedbackPayload){
     const newFeedbackItem: FeedbackItem = {

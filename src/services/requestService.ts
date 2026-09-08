@@ -1,6 +1,6 @@
-import { transmitBatchPublishingViaAbly, transmitViaAbly } from "../clients/ablyClient";
-import { ablyKeyWS } from "../k";
-import { batchGetRequests, putRequest, queryActiveRequestsByRestaurant, updateBatchRequestsToDeactivate, updateRequestState, updateRequestToDeactivate } from "../repositories/requestRepository";
+import { transmitBatchPublishingViaAbly, transmitViaAbly } from "../clients/ablyClient.js";
+import { ablyKeyWS } from "../k.js";
+import { batchGetRequests, putRequest, queryActiveRequestsByRestaurant, updateBatchRequestsToDeactivate, updateRequestState, updateRequestToDeactivate } from "../repositories/requestRepository.js";
 import {
     ActiveRequestStatus,
     RequestCancelClientPayload,
@@ -12,8 +12,7 @@ import {
     RequestIdentificatorsPayload,
     TableRequest,
     BatchCancellationPayload,
-    BatchCancellationItem,
-} from "../types/requests";
+} from "../types/requests.js";
 
 export async function saveRequest(requestPayload: TableRequestPayload, requestTime: number) {
 

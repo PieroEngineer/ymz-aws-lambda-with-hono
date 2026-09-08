@@ -1,7 +1,7 @@
-import { docClient } from "../clients/docClient";
-import { GSI_TABLE_NAME, TABLE_NAME } from "../k";
-import { OrderItemPayload } from "../types/orders";
-import { ConfirmedOrder, ConfirmedOrderItem, dishPrice, dishPricesDbResponse, Order, PaymentConfirmationPayload } from "../types/payments";
+import { docClient } from "../clients/docClient.js";
+import { GSI_TABLE_NAME, TABLE_NAME } from "../k.js";
+import { OrderItemPayload } from "../types/orders.js";
+import { ConfirmedOrder, ConfirmedOrderItem, dishPrice, dishPricesDbResponse, Order, PaymentConfirmationPayload } from "../types/payments.js";
 import { BatchGetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 
 
@@ -51,6 +51,10 @@ export async function getSpecificDishesData( orderSelections: OrderItemPayload[]
         PK: `REST#${restaurantId}`,
         SK: `RESOURCE#DISH#${selection.dishId}`,
     }));
+
+    if(TABLE_NAME === undefined){
+        throw new Error("🚩📑  TABLE_NAME is undefined. Please check your environment configuration.");
+    }
 
     ///     const batchResponse = await docClient.send(new BatchGetCommand({
     const response = await docClient.send(new BatchGetCommand({ /// Analyze if a transaction is more proper for this situation

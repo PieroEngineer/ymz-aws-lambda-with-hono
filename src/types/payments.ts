@@ -1,5 +1,5 @@
-import { OrderItemPayload } from "./orders"
-import { PresignedUrls } from "./s3Clients"
+import { OrderItemPayload } from "./orders.js"
+import { PresignedUrls } from "./s3Clients.js"
 
 
 // --- Input types ---

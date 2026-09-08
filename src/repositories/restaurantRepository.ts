@@ -7,9 +7,9 @@ import {
     TransactWriteCommandInput,
     UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { docClient } from "../clients/docClient";
-import { GSI2_TABLE_NAME, TABLE_NAME } from "../k";
-import { DishSyncInput, RestaurantDataToUpdate, RestaurantMetadataData, TemporalFeedRestaurant } from "../types/restaurants";
+import { docClient } from "../clients/docClient.js";
+import { GSI2_TABLE_NAME, TABLE_NAME } from "../k.js";
+import { DishSyncInput, RestaurantDataToUpdate, RestaurantMetadataData, TemporalFeedRestaurant } from "../types/restaurants.js";
 
 type TransactItem = NonNullable<TransactWriteCommandInput["TransactItems"]>[number];
 
@@ -107,7 +107,11 @@ export async function getTemporalRestaurantFeed(): Promise<TemporalFeedRestauran
 
 export async function batchGetRestaurantMetadata(restaurantIds: string[]) {
     const restaurantKeys = restaurantIds.map(rid => ({ PK: `REST#${rid}`, SK: "METADATA" }));
-
+    
+    if(TABLE_NAME === undefined){
+        throw new Error("🚩📑  TABLE_NAME is undefined. Please check your environment configuration.");
+    }
+    
     // ⚡ Execute High-Speed Batch Read against DynamoDB Grid Core
     const batchResponse = await docClient.send(new BatchGetCommand({
         RequestItems: {

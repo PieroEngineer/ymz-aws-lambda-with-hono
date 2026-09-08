@@ -1,7 +1,7 @@
-import { BatchGetCommand, DeleteCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
-import { docClient } from "../clients/docClient";
-import { GSI_TABLE_NAME, TABLE_NAME } from "../k";
-import { RequestIdentificatorsPayload, NewRequestItem, RequestItemData, TableRequest, TableRequestPayload, RequestCancelPayload, BatchCancellationItem, BatchCancellationPayload } from "../types/requests";
+import { BatchGetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { docClient } from "../clients/docClient.js";
+import { GSI_TABLE_NAME, TABLE_NAME } from "../k.js";
+import { RequestIdentificatorsPayload, NewRequestItem, TableRequest, BatchCancellationPayload } from "../types/requests.js";
 
 // export async function putRequest(restaurantId: string, requestId: string, requestData: RequestItemData) {
 export async function putRequest(requestPayload: TableRequest) {
@@ -121,7 +121,11 @@ export async function batchGetRequests(requestsToUpdate: RequestIdentificatorsPa
         PK: `REST#${item.restaurantId}`,
         SK: `REQ#${item.requestId}`
     }));
-
+    
+    if(TABLE_NAME === undefined){
+        throw new Error("🚩📑  TABLE_NAME is undefined. Please check your environment configuration.");
+    }
+    
     // ⚡ Execute High-Speed Batch Read against DynamoDB Grid Core
     const batchResponse = await docClient.send(new BatchGetCommand({
         RequestItems: {

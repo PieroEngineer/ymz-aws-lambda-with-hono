@@ -1,5 +1,5 @@
-import { putFeedback, putRestaurantContact } from "../repositories/contactRepository";
-import { FeedbackPayload, RestaurantContactPayload } from "../types/contacts";
+import { putFeedback, putRestaurantContact } from "../repositories/contactRepository.js";
+import { FeedbackPayload, RestaurantContactPayload } from "../types/contacts.js";
 
 
 export async function saveFeedback(body: FeedbackPayload){

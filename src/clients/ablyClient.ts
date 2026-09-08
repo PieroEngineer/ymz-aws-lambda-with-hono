@@ -1,4 +1,4 @@
-import { ablyKeyWS } from "../k";
+import { ablyKeyWS } from "../k.js";
 
 
 export async function transmitViaAbly( channelName: string, eventName: string, dataPayload:  any, maxAttempts = 3 ){    /// Would it be a bad practice to pass the type as argument?

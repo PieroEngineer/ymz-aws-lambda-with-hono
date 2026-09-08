@@ -1,7 +1,7 @@
-import { getS3Client } from "../aws/clientFactory";
+import { getS3Client } from "../aws/clientFactory.js";
 import { isLocal } from "../aws/clientFactory.js";
-import { BUCKET_NAME } from "../k";
-import { PresignedUrls } from "../types/s3Clients";
+import { BUCKET_NAME } from "../k.js";
+import { PresignedUrls } from "../types/s3Clients.js";
 import { PutObjectCommand } from "@aws-sdk/client-s3"; // 📦 Native S3 actions
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"; // 🔑 Presign signing engines
 
@@ -12,6 +12,10 @@ export async function generateS3PresignedUrl( s3Key: string ) : Promise<Presigne
     // 🕒 CACHE BUSTING: Generate a standard Unix epoch timestamp (in seconds)
       const unixEpoch = Math.floor(Date.now() / 1000);
     
+      if(!BUCKET_NAME) {
+        throw new Error("🚩📑  BUCKET_NAME is undefined. Please check your environment configuration.");
+      }
+
       // 🗺️ DYNAMIC S3 RESOLUTION: Switches seamlessly between LocalStack and AWS Cloud grids
       const s3BaseUrl = isLocal 
         ? `http://localhost:4566/${BUCKET_NAME}`
