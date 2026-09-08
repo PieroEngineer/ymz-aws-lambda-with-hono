@@ -1,5 +1,5 @@
-import { deletePreference, putPreference } from "../repositories/userRepository";
-import { PreferencePayload } from "../types/users";
+import { putUser, deletePreference, putPreference, getUserMetadata } from "../repositories/userRepository.js";
+import { PreferencePayload, User } from "../types/users.js";
 
 export async function saveUserPreference(userId: string, prefId: string, body: PreferencePayload) {
     /**
@@ -15,4 +15,12 @@ export async function saveUserPreference(userId: string, prefId: string, body: P
 
 export async function deleteUserPreference(userId: string, prefId: string) {
     await deletePreference(userId, prefId);
+}
+
+export async function createUser( newUser: User ){
+    await putUser( newUser )
+}
+
+export async function obtainUserData( userId: string ): Promise<User>{
+    return await getUserMetadata(userId)
 }

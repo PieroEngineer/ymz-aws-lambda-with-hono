@@ -1,4 +1,4 @@
-import { generateS3PresignedUrl } from "../clients/s3Client";
+import { generateS3PresignedUrl } from "../clients/s3Client.js";
 import {
     batchGetRestaurantMetadata,
     buildDishDeleteTransactItem,
@@ -14,7 +14,7 @@ import {
     putRestaurantMetadata,
     queryRestaurantMenuResources,
     updateRestaurantMetadata,
-} from "../repositories/restaurantRepository";
+} from "../repositories/restaurantRepository.js";
 import {
     Dish,
     FeedItem,
@@ -30,7 +30,7 @@ import {
     RestaurantMetadataData,
     RestaurantUpdatePayload,
     SyncDataFirstResponse,
-} from "../types/restaurants";
+} from "../types/restaurants.js";
 import { TransactWriteCommandInput } from "@aws-sdk/lib-dynamodb";
 
 type TransactItem = NonNullable<TransactWriteCommandInput["TransactItems"]>[number];

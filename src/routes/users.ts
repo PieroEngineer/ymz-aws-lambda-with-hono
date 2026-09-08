@@ -1,9 +1,57 @@
 import { Hono } from "hono";
-import { deleteUserPreference, saveUserPreference } from "../services/userService.js";
-import { PreferencePayload } from "../types/users.js";
+import { createUser, deleteUserPreference, obtainUserData, saveUserPreference } from "../services/userService.js";
+import { PreferencePayload, User, UserCreationPayload, UserDataResponse } from "../types/users.js";
 
 // 📦 Create an isolated, modular sub-router for /users routes
 export const usersRouter = new Hono();
+
+usersRouter.post("/:userId/create", async (c) => {
+  // TODO: Here the restaurant is initialized with the default values when the restaurant register
+  try {
+    const userId = c.req.param("userId");
+    if (!userId) {
+      return c.json({ error: "userId is required" }, 400);
+    }
+
+    const body: UserCreationPayload = await c.req.json().catch(() => ({}));
+
+    const newUser: User = { // TODO: Move to mapper
+      userId: userId,
+      username: body.username,
+      creationTimestamp: Date.now()
+    }
+
+    await createUser( newUser );
+
+    return c.json({ message: "✅  User created successfully" }, 200);
+
+  }
+  catch (error: any) {
+    console.error(`🚨 USER CREATION ERROR -> ${error.message}`);
+    return c.json({ error: "Internal Server Error" }, 500);
+  }
+
+});
+
+usersRouter.get("/:userId", async (c) => {
+  try {
+    const userId = c.req.param("userId");
+    if (!userId) {
+      return c.json({ error: "userId is required" }, 400);
+    }
+
+    const user = await obtainUserData(userId);
+
+    const userDataResponse: UserDataResponse = {
+      username: user.username
+    };
+
+    return c.json(userDataResponse, 200);
+  } catch (error: any) {
+    console.error(`🚨 USER RETRIEVAL ERROR -> ${error.message}`);
+    return c.json({ error: "Internal Server Error" }, 500);
+  }
+});
 
 /**
  * 🛰️ ROUTE: Save or update a user preferences entity
