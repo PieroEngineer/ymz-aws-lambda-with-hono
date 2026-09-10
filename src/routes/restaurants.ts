@@ -29,7 +29,7 @@ restaurantsRouter.post("/:restaurantId/info/initialize", async (c) => {
       return c.json({ error: "restaurantId is required" }, 400);
     }
 
-    const body: RestaurantInitializePayload = await c.req.json().catch(() => ({}));
+    const body: RestaurantInitializePayload = await c.req.json().catch(() => ({})); // FIXME: Include the ID of the restaurant
 
     const initializeResponse = await initializeRestaurantInfo(restaurantId, body);
 
@@ -44,6 +44,7 @@ restaurantsRouter.post("/:restaurantId/info/initialize", async (c) => {
 });
 
 restaurantsRouter.get("/:restaurantId/info", async (c) => {
+  console.log( `🔎✅ Fetching restaurant info for restaurantId` );
   try {
     const restaurantId = c.req.param("restaurantId");
 

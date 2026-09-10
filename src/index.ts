@@ -1,42 +1,34 @@
 import { Hono } from "hono";
-import { cors } from "hono/cors"; // 🔌 1. Import the native CORS middleware
 import { handle } from "hono/aws-lambda"; // 🔌 Official Hono adapter for AWS serverless payloads
 import { requestsRouter } from "./routes/requests.js"; // 📦 Import your requests submodule router
 import { paymentsRouter } from "./routes/payments.js";
 import { restaurantsRouter } from "./routes/restaurants.js"; // 🔌 Import the new file
 import { usersRouter } from "./routes/users.js";
 import { contactsRouter } from "./routes/contacts.js";
+import { cors } from "hono/cors";
 
 // Initialize the root Hono platform application
 const app = new Hono();
 
-// Environment-aware origin verification
-const ALLOWED_ORIGINS = [
-  "http://localhost:3000",
-  "http://localhost:5173",
-  process.env.FRONTEND_URL || "" // Dynamically set in SAM template
-];
 
-// 🔓 2. Enable CORS globally before your routes
-// This allows your web app running on ANY local port to talk to your API
-app.use(
-  "/*",
-  cors({
-    origin: (origin) => {
-      if (!origin) return ALLOWED_ORIGINS[0]; // Allow non-browser callers (Postman, mobile native)
-      if (origin.includes("localhost") || ALLOWED_ORIGINS.includes(origin)) {
-        return origin;
-      }
-      return null;
-    },
-    allowHeaders: ["Content-Type", "Authorization"],
-    // YES: Always include PATCH for RESTful partial updates (e.g., updating partial user profiles)
-    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], 
-    exposeHeaders: ["Content-Length"],
-    maxAge: 86400, // 24 hours (Reduces preflight OPTIONS requests)
-    credentials: true,
-  })
-);
+app.use('*', cors({
+  origin: 'http://localhost:5173',
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  maxAge: 86400,
+}))
+
+// if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
+//   app.use(
+//     '*',
+//     cors({
+//       origin: 'http://localhost:5173',
+//       credentials: true,
+//     })
+//   );
+// }
+
 
 /**
  * 🚇 UNIFIED SUB-ROUTER REGISTRATION

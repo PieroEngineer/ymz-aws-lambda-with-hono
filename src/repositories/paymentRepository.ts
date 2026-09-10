@@ -1,7 +1,7 @@
 import { docClient } from "../clients/docClient.js";
 import { GSI_TABLE_NAME, TABLE_NAME } from "../k.js";
 import { OrderItemPayload } from "../types/orders.js";
-import { ConfirmedOrder, ConfirmedOrderItem, dishPrice, dishPricesDbResponse, Order, PaymentConfirmationPayload } from "../types/payments.js";
+import { ConfirmedOrder, ConfirmedOrderItem, dishPrice, dishPricesDbResponse, Order } from "../types/payments.js";
 import { BatchGetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 
 
