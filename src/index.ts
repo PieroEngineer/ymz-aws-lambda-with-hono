@@ -37,8 +37,8 @@ app.use('*', cors({
  */
 app.route("/payments", paymentsRouter);
 app.route("/requests", requestsRouter);
-app.route("/restaurants", restaurantsRouter); // 🏪 Funnels all /restaurants/* traffic here
-app.route("/users", usersRouter); // 🙋 Funnels all /users/* traffic straight into the new module
+app.route("/restaurants", restaurantsRouter);
+app.route("/users", usersRouter);
 app.route("/contacts", contactsRouter);
 
 /**
@@ -58,6 +58,20 @@ app.get("/", (c) => {
  * The handle() wrapper automatically translates API Gateway events (v1 and v2) 
  * into standard Hono requests and responses perfectly.
  */
-export const handler = handle(app);
+// export const handler = handle(app);
+
+// For real AWS 
+const rawHandler = handle(app)
+
+export const handler = async (event: any, context: any) => {
+  const stage = event.requestContext?.stage
+  if (stage && stage !== '$default' && event.rawPath?.startsWith(`/${stage}`)) {
+    event.rawPath = event.rawPath.slice(stage.length + 1) || '/'
+    if (event.requestContext?.http?.path) {
+      event.requestContext.http.path = event.requestContext.http.path.slice(stage.length + 1) || '/'
+    }
+  }
+  return rawHandler(event, context)
+}
 
 export default app;
