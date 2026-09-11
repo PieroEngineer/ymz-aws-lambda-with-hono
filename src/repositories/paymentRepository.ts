@@ -56,7 +56,6 @@ export async function getSpecificDishesData( orderSelections: OrderItemPayload[]
         throw new Error("🚩📑  TABLE_NAME is undefined. Please check your environment configuration.");
     }
 
-    ///     const batchResponse = await docClient.send(new BatchGetCommand({
     const response = await docClient.send(new BatchGetCommand({ /// Analyze if a transaction is more proper for this situation
         RequestItems: {
         [TABLE_NAME]: {

@@ -114,7 +114,7 @@ requestsRouter.post( "/cancel",async (c) => {
   try{
     const body: BatchCancellationPayload = await c.req.json().catch(() => ({}));
 
-    if (!body.requestsToCancel || body.requestsToCancel.length === 0) {
+    if (!body.requestsToCancel) {
       return c.json({ error: "Missing cancellations array" }, 400);
     }
 
