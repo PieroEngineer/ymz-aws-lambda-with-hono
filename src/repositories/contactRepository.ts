@@ -4,10 +4,13 @@ import { TABLE_NAME } from "../k.js";
 import { FeedbackItem, FeedbackPayload, RestaurantContactPayload } from "../types/contacts.js";
 
 export async function putFeedback(FeedbackPayload: FeedbackPayload){
-    const newFeedbackItem: FeedbackItem = {
-        PK: `USER#${FeedbackPayload.userId}`,   // FIXME: I think is better to put the Feedback as partition key, because we look for set of feedbacks, not for specific user's feedback
-        SK: `FEEDBACK#${crypto.randomUUID()}`,  // TODO: Try with timestamp instead of UUID
+    const currentTimestamp = new Date().toISOString();
 
+    const newFeedbackItem: FeedbackItem = {
+        PK: `FEEDBACK`,
+        SK: `TIMESTAMP#${currentTimestamp}`,
+
+        userId: FeedbackPayload.userId,
         requestId: FeedbackPayload.requestId,
         conformDegree: FeedbackPayload.conformDegree,
         description: FeedbackPayload.description
@@ -21,10 +24,12 @@ export async function putFeedback(FeedbackPayload: FeedbackPayload){
 }
 
 export async function putRestaurantContact(restaurantContactPayload: RestaurantContactPayload){
-     const newFinalContactItem = {
-        PK: `USER#${restaurantContactPayload.userId}`,
-        SK: `RCONTACT#${crypto.randomUUID()}`,
+    const currentTimestamp = new Date().toISOString();
+    const newFinalContactItem = {   // TODO: Include a timestamp
+        PK: `RCONTACT`,
+        SK: `TIMESTAMP#${currentTimestamp}`,
 
+        userId: restaurantContactPayload.userId,
         restaurantName: restaurantContactPayload.restaurantName,
         restaurantContact: restaurantContactPayload.restaurantContact,
         restaurantComment: restaurantContactPayload.restaurantComment

@@ -29,6 +29,7 @@ export interface RestaurantContactPayload{
 export interface FeedbackItem{
     PK: string
     SK: string
+    userId: string,
     requestId: string
     conformDegree: FeedbackLevelToken
     description: string
