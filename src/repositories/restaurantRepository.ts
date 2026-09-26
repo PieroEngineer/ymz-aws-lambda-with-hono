@@ -125,7 +125,7 @@ export async function batchGetRestaurantMetadata(restaurantIds: string[]) {
     return batchResponse.Responses?.[TABLE_NAME] || [];
 }
 
-export async function queryRestaurantMenuResources(restaurantId: string) {
+export async function queryRestaurantMenuResources(restaurantId: string) {  // TODO: Type every output
     // ⚡ SINGLE-TABLE QUERY: Grabs both Dishes and Menu details in 1 fast DB request
     const response = await docClient.send(new QueryCommand({
         TableName: TABLE_NAME,
@@ -249,17 +249,20 @@ export function buildDishDeleteTransactItem(restaurantId: string, dishId: string
     };
 }
 
+// TODO: Include types within these builders
 export function buildDishPutTransactItem(restaurantId: string, dish: DishSyncInput): TransactItem {
     const sk = `RESOURCE#DISH#${dish.id}`;
 
-    return {
+    return {    
         Put: {
             TableName: TABLE_NAME,
             Item: { // Shape of what is going to be sent
                 PK: `REST#${restaurantId}`,
                 SK: sk,
                 dishName: dish.name,
-                priceCents: Number(dish.priceCents || 0),
+                availableComplementaryDishIds: dish.availableComplementaryDishIds,
+                type: dish.type,
+                priceCents: Number(dish.priceCents || 0),   // TODO: Shouldn't we remove these fallbacks
                 prepTime: Number(dish.prepTime || 0),
                 isOutOfStock: dish.isOutOfStock,
                 menuPageId: dish.menuPageId,
@@ -297,7 +300,9 @@ export function buildDishUpdateTransactItem(
         description: "description",
         isOutOfStock: "isOutOfStock",
         imageUrl: "imageUrl",
-        createdAt: "createdAt"  /// Maybe it shouldn't be here because it'e never updated
+        createdAt: "createdAt",  /// Maybe it shouldn't be here because it'e never updated
+        availableComplementaryDishIds: "availableComplementaryDishIds",
+        type: "type"
     };
 
     // Extract the target payload block (checks flat attributes first, falls back to an inner updatedFields map if structured that way)
@@ -318,6 +323,9 @@ export function buildDishUpdateTransactItem(
             else if (clientKey === "isOutOfStock") {
                 expressionAttributeValues[`:${clientKey}`] = Boolean(payloadSource[clientKey]);
             }
+            // else if (clientKey === "availableComplementaryDishIds") {
+            //     expressionAttributeValues[`:${clientKey}`] = payloadSource[clientKey];
+            // }
             else {
                 expressionAttributeValues[`:${clientKey}`] = payloadSource[clientKey];
             }

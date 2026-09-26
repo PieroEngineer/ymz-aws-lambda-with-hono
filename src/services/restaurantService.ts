@@ -346,7 +346,7 @@ export async function obtainRestaurantMenu(restaurantId: string): Promise<MenuRe
     for (const item of items) {
         const sk: string = item.SK || "";
 
-        if (sk.startsWith("RESOURCE#MENU#")) {
+        if (sk.startsWith("RESOURCE#MENU#")) { // TODO: Remove the unnecessary fallbacks and use the technique to don't write every attribute necessarely. (Both, dishes and menu) 
             menuPages.push({
                 pageId: sk.replace("RESOURCE#MENU#", ""),
                 imageUrl: item.imageUrl || "",
@@ -362,6 +362,8 @@ export async function obtainRestaurantMenu(restaurantId: string): Promise<MenuRe
                     prepTime: Number(item.prepTime),
                     isOutOfStock: Boolean(item.isOutOfStock || false),
                     menuPageId: item.menuPageId,
+                    availableComplementaryDishIds: item.availableComplementaryDishIds || [], 
+                    type: item.type || 'MAIN',
                     coordinateXInMenu: item.coordinateXInMenu,
                     coordinateYInMenu: item.coordinateYInMenu,
                     createdAt: item.createdAt,
@@ -458,6 +460,11 @@ export async function synchronizeRestaurantMenu(
         }
         else if (action === "update") {
             const updateItem = buildDishUpdateTransactItem(restaurantId, dishId, dish.updatedFields || {});
+
+            // Continue here: 
+            // I just already configurated these functions to accept the edition with the new types.
+            // The get menu is done too. Now We need to modify the reception of the order selections
+            // and properly calculate the costs.
 
             if (updateItem) {
                 transactionItems.push(updateItem);

@@ -42,6 +42,8 @@ export interface DishSyncInput {
     menuPageId?: string
     coordinateXInMenu?: number
     coordinateYInMenu?: number
+    availableComplementaryDishIds?: string[]
+    type?: DishTypeToken
     description?: string
     imageUrl?: string
     updatedFields?: Record<string, unknown>
@@ -108,6 +110,8 @@ export interface Dish {
     menuPageId: string
     coordinateXInMenu: number
     coordinateYInMenu: number
+    availableComplementaryDishIds: string[]
+    type: DishTypeToken
     createdAt: number
     description: string
 }
@@ -124,6 +128,7 @@ export interface PaymentInfoResponse {
 }
 
 // --- Repository types ---
+export type DishTypeToken =  'MAIN' | 'COMPLEMENTARY'
 
 export interface RestaurantDataToUpdate {
     name: string,

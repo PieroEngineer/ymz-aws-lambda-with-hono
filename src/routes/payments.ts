@@ -16,6 +16,8 @@ paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every 
       return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
     }
 
+    // TODO: Check if the complement dishes have the "COMPLEMENT" label
+
     const dishItems: dishPrice[] = await obtainSpecificDishesData(body.orderSelections, body.restaurantId)
     console.log(`✅  Retrieved specific dish data for restaurantId: ${body.restaurantId}, requestId: ${body.requestId}`);
 
