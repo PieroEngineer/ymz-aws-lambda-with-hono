@@ -26,18 +26,7 @@ export async function putRequest(requestPayload: TableRequest) {
     }));
 }
 
-//X
-// export async function deleteRequest(restaurantId: string, requestId: string) {
-//     const pk = `REST#${restaurantId}`;
-//     const sk = `REQ#${requestId}`;
-
-//     // TODO: Before removing, verify if the request status is removable.
-//     await docClient.send(new DeleteCommand({  // TODO: This is temporal  code and should be alternated with the commented code that is just above
-//         TableName: TABLE_NAME,
-//         Key: { PK: pk, SK: sk },
-//     }));
-// }
-
+// TODO: This function must have a parameter to differentiate between a deactivation due it was converted into an order or because it was cancelled
 export async function updateRequestToDeactivate(restaurantId: string, requestId: string) {  // TODO: Include a dyanmic timestamp attribute depending the raeson of the deactivation
 
     await docClient.send( new UpdateCommand({
