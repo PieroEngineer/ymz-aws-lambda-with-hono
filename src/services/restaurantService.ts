@@ -363,7 +363,7 @@ export async function obtainRestaurantMenu(restaurantId: string): Promise<MenuRe
                     isOutOfStock: Boolean(item.isOutOfStock || false),
                     menuPageId: item.menuPageId,
                     availableComplementaryDishIds: item.availableComplementaryDishIds || [], 
-                    type: item.type || 'MAIN',
+                    dishType: item.dishType || 'MAIN',
                     coordinateXInMenu: item.coordinateXInMenu,
                     coordinateYInMenu: item.coordinateYInMenu,
                     createdAt: item.createdAt,

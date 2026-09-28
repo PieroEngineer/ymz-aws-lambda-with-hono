@@ -43,7 +43,7 @@ export interface DishSyncInput {
     coordinateXInMenu?: number
     coordinateYInMenu?: number
     availableComplementaryDishIds?: string[]
-    type?: DishTypeToken
+    dishType?: DishTypeToken
     description?: string
     imageUrl?: string
     updatedFields?: Record<string, unknown>
@@ -111,7 +111,7 @@ export interface Dish {
     coordinateXInMenu: number
     coordinateYInMenu: number
     availableComplementaryDishIds: string[]
-    type: DishTypeToken
+    dishType: DishTypeToken
     createdAt: number
     description: string
 }

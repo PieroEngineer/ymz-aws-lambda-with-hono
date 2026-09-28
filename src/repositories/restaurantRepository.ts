@@ -261,7 +261,7 @@ export function buildDishPutTransactItem(restaurantId: string, dish: DishSyncInp
                 SK: sk,
                 dishName: dish.name,
                 availableComplementaryDishIds: dish.availableComplementaryDishIds,
-                type: dish.type,
+                dishType: dish.dishType,
                 priceCents: Number(dish.priceCents || 0),   // TODO: Shouldn't we remove these fallbacks
                 prepTime: Number(dish.prepTime || 0),
                 isOutOfStock: dish.isOutOfStock,
@@ -281,7 +281,7 @@ export function buildDishPutTransactItem(restaurantId: string, dish: DishSyncInp
     };
 }
 
-export function buildDishUpdateTransactItem(
+export function buildDishUpdateTransactItem(    // TODO: This kind of functions go in "Service", no in "Repo" 
     restaurantId: string,
     dishId: string,
     updatedFields: Record<string, unknown>
@@ -300,9 +300,9 @@ export function buildDishUpdateTransactItem(
         description: "description",
         isOutOfStock: "isOutOfStock",
         imageUrl: "imageUrl",
-        createdAt: "createdAt",  /// Maybe it shouldn't be here because it'e never updated
+        createdAt: "createdAt",  /// Maybe it shouldn't be here because it's never updated
         availableComplementaryDishIds: "availableComplementaryDishIds",
-        type: "type"
+        dishType: "dishType"
     };
 
     // Extract the target payload block (checks flat attributes first, falls back to an inner updatedFields map if structured that way)
@@ -323,7 +323,7 @@ export function buildDishUpdateTransactItem(
             else if (clientKey === "isOutOfStock") {
                 expressionAttributeValues[`:${clientKey}`] = Boolean(payloadSource[clientKey]);
             }
-            // else if (clientKey === "availableComplementaryDishIds") {
+            // else if (clientKey === "availableComplementaryDishIds") {    //X It's the same. It it work
             //     expressionAttributeValues[`:${clientKey}`] = payloadSource[clientKey];
             // }
             else {
