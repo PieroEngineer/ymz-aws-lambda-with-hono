@@ -5,9 +5,10 @@ import { PresignedUrls } from "./s3Clients.js"
 // --- Input types ---
 
 export interface PaymentConfirmationPayload {
+    orderId: string                 // TODO: These should be generated in backend, not in the client                   
+    requestId: string           //
     restaurantId: string
     userId: string
-    requestId: string
     userName: string
     arrivalTimeInMinutes: number
     groupSize: number
@@ -22,22 +23,23 @@ export interface FinalizeOrderPayload{
 // --- Output types ---
 export interface PaymentConfirmationResponse{
     message: string
-    requestId: string
+    orderId: string
     totalPriceInCents: number
     paymentImageReferences: PresignedUrls
 }
 
 
 export interface Order{ /// For now, it's practically "OrderResponse" // TODO: Try to divide all the types of all features in input, output and domain (mimic is valid between interfaces) 
-    userId: string,
-    requestId: string,
-    userName: string,
-    arrivalTimeInMinutes: number,
-    groupSize: number,
-    orderSelections: OrderItemPayload[],
-    totalCostInCents: number,
-    // lastUpdateTimestamp: number,
-    onPaidTimeStamp: number,
+    userId: string
+    requestId: string
+    orderId: string
+    userName: string
+    arrivalTimeInMinutes: number
+    groupSize: number
+    orderSelections: OrderItemPayload[]
+    totalCostInCents: number
+    // lastUpdateTimestamp: number
+    onPaidTimeStamp: number
     paymentImageUrl: string
 }
 
@@ -48,7 +50,7 @@ export interface dishPricesDbResponse {
     priceCents: number
 }
 
-export type ConfirmedOrderItem = Omit<Order, 'requestId'> & {
+export type ConfirmedOrderItem = Omit<Order, 'orderId'> & {
     PK: string;
     SK: string;
 

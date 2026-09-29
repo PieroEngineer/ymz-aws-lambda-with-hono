@@ -12,24 +12,22 @@ paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every 
 
     // TODO: Only the users in ACCEPTED can do this 
 
-    if (!body.restaurantId || !body.userId || !body.requestId) {
-      return c.json({ error: "Missing restaurantId, userId, or requestId" }, 400);
+    if (!body.restaurantId || !body.orderId || !body.requestId) {
+      return c.json({ error: "Missing restaurantId, orderId, or requestId" }, 400);
     }
 
     // TODO: Check if the complement dishes have the "COMPLEMENT" label
 
     const dishItems: dishPrice[] = await obtainSpecificDishesData(body.orderSelections, body.restaurantId)
-    console.log(`✅  Retrieved specific dish data for restaurantId: ${body.restaurantId}, requestId: ${body.requestId}`);
+    console.log(`✅  Retrieved specific dish data for restaurantId: ${body.restaurantId}, orderId: ${body.orderId}`);
 
     const totalCostInCents = calculateTotalCost(body.orderSelections, dishItems);
-    console.log(`✅  Total cost calculated for restaurantId: ${body.restaurantId}, requestId: ${body.requestId} is ${totalCostInCents} cents`);
+    console.log(`✅  Total cost calculated for restaurantId: ${body.restaurantId}, orderId: ${body.orderId} is ${totalCostInCents} cents`);
 
-    // IN FAIL: I changed the menus for payments because that has more sense, look for possible bugs
-    // const s3Key = `menus/${body.restaurantId}/${body.requestId}.webp`;  /// This shape could be useful when we use "S3 ObjectCreated event"
-    const s3Key = `payments/${body.restaurantId}/${body.requestId}.webp`;  /// This shape could be useful when we use "S3 ObjectCreated event"
+    const s3Key = `payments/${body.restaurantId}/${body.orderId}.webp`;  /// This shape could be useful when we use "S3 ObjectCreated event"
 
     const paymentImageReferences: PresignedUrls = await obtainPaymentPresignedUrl(s3Key)
-    console.log(`✅  Obtained presigned URLs for restaurantId: ${body.restaurantId}, requestId: ${body.requestId}`);
+    console.log(`✅  Obtained presigned URLs for restaurantId: ${body.restaurantId}, orderId: ${body.orderId}`);
     console.log(`🔎🔎  Presigned URLs: ${JSON.stringify(paymentImageReferences)}`);
 
     const now = Date.now()
@@ -42,14 +40,14 @@ paymentsRouter.post("/confirm", async (c) => {  // TODO: Implement Zod in every 
     }
 
     await saveConfirmedOrder(newConfirmationEvent)
-    console.log(`✅  Order confirmed and saved for restaurantId: ${body.restaurantId}, requestId: ${body.requestId}`)
+    console.log(`✅  Order confirmed and saved for restaurantId: ${body.restaurantId}, orderId: ${body.orderId}`)
 
     await transmitConfirmationToRestaurant(newConfirmationEvent)
-    console.log(`✅  Confirmation transmitted to restaurantId: ${body.restaurantId}, requestId: ${body.requestId}`)
+    console.log(`✅  Confirmation transmitted to restaurantId: ${body.restaurantId}, orderId: ${body.orderId}`)
 
     const paymentConfirmationResponse: PaymentConfirmationResponse = {
       message: "Order saved successfully and broadcast state synchronized",
-      requestId: body.requestId,
+      orderId: body.orderId,
       totalPriceInCents: totalCostInCents,
       paymentImageReferences: paymentImageReferences
       // realtimeNotified: ablyDispatchSuccess

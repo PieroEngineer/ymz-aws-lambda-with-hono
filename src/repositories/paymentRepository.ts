@@ -21,11 +21,12 @@ export async function getAllActiveOrders( restaurantId: string ): Promise<Order[
     const rawItems = dbResult.Items || [];
 
     const mappedOrders = rawItems.map((item) => {
-        const requestId = item.SK.replace("ORDER#", "");
+        const orderId = item.SK.replace("ORDER#", "");
         // or  const requestId = item.GSISK.replace("ORDER#ACTIVE#", "");
 
         const order: Order = {
-            requestId,
+            orderId: orderId,
+            requestId: item.requestId ?? orderId,   // ANCHOR: Remove the fallback when publish the app
             userName: item.userName,
             // lastUpdateTimestamp: item.lastUpdateTimestamp,
             userId: item.userId,
@@ -89,14 +90,14 @@ export async function getSpecificDishesData( orderSelections: OrderItemPayload[]
 
 export async function putConfirmedOrder( confirmationEvent: ConfirmedOrder ){
 
-    const {restaurantId, requestId, ...data} = confirmationEvent
+    const {restaurantId, orderId, ...data} = confirmationEvent
 
     const newConfirmationEvent: ConfirmedOrderItem = {
         PK: `REST#${restaurantId}`,
-        SK: `ORDER#${requestId}`,   /// Perphaps it should be a new ID, not the request ID
+        SK: `ORDER#${orderId}`,   /// Perphaps it should be a new ID, not the request ID
         
         GSIPK: `REST#${restaurantId}`,
-        GSISK: `ORDER#ACTIVE#${requestId}`,
+        GSISK: `ORDER#ACTIVE#${orderId}`,
 
         ...data
     }
