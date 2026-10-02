@@ -16,9 +16,6 @@ export interface TableRequestPayload{
     userId: string
     userName: string
     groupSize: number
-
-
-
     arrivalTime: number
 }
 
@@ -38,10 +35,14 @@ export interface ActiveRequestsPayload {
     requestsToUpdate: RequestIdentificatorsPayload[]
 }
 
+export interface RequestIdentificatorsPayload {
+    restaurantId: string,
+    requestId: string 
+}
+
 // --- Output types ---
 
 export interface TableRequestResponse {
-
     requestId: string
     userId: string
     userName: string
@@ -52,15 +53,20 @@ export interface TableRequestResponse {
     arrivlaTime: number
 }
 
-export interface ActiveRequestStatus {
+export interface ActiveRequests {
     requestId: string
+    restaurantId: string
     state: string
+    userId: string
+    onQueuedTimestamp: number
+    arrivalTimeInMinutes: number // TODO: Correct the name
 }
 
 export interface CreateRequestResponse {
     message: string
     requestId: string
     realtimeNotified: boolean
+    onQueuedTimestamp: number
 }
 
 export interface UpdateRequestResponse {
@@ -71,15 +77,11 @@ export interface UpdateRequestResponse {
     realtimeNotified: boolean
 }
 
-export interface ActiveRequestsResponse {
-    statuses: ActiveRequestStatus[]
-}
+export type ActiveRequestsResponse = Omit<TableRequest, 'restaurantId'>
 
 // --- Repository types ---
 
 export interface RequestItemData {
-
-
     userId: string
     userName: string
     groupSize: number
@@ -120,7 +122,8 @@ export interface RequestStatusUpdateClientPayload {
     newStatus: string
 }
 
-export interface RequestIdentificatorsPayload {
-    restaurantId: string,
-    requestId: string 
+
+export interface FilteredRequests {
+    expiredRequestIds: BatchCancellationItem[];
+    activeRequests: ActiveRequestsResponse[];
 }

@@ -2,7 +2,7 @@ import { transmitBatchPublishingViaAbly, transmitViaAbly } from "../clients/ably
 import { ablyKeyWS } from "../k.js";
 import { batchGetRequests, putRequest, queryActiveRequestsByRestaurant, updateBatchRequestsToDeactivate, updateRequestState, updateRequestToDeactivate } from "../repositories/requestRepository.js";
 import {
-    ActiveRequestStatus,
+    ActiveRequests,
     RequestCancelClientPayload,
     RequestCancelPayload,
     TableRequestPayload,
@@ -12,6 +12,9 @@ import {
     RequestIdentificatorsPayload,
     TableRequest,
     BatchCancellationPayload,
+    FilteredRequests,
+    ActiveRequestsResponse,
+    BatchCancellationItem,
 } from "../types/requests.js";
 
 export async function saveRequest(requestPayload: TableRequestPayload, requestTime: number) {
@@ -99,7 +102,7 @@ export async function deactivateBatchRequests(
     await updateBatchRequestsToDeactivate(cancelPayload);
 }
 
-export async function transmitBatchRequestCancellation(
+export async function transmitBatchRequestCancellationToRestaurants(
     cancelPayload: BatchCancellationPayload
 ) {
 
@@ -125,32 +128,18 @@ export async function transmitBatchRequestCancellation(
     await transmitBatchPublishingViaAbly(batchPayload);
 }
 
-export async function obtainRestaurantActiveRequests(restaurantId: string): Promise<TableRequestResponse[]> {
+
+export async function obtainRestaurantActiveRequests(restaurantId: string): Promise<FilteredRequests> {
     const rawItems = await queryActiveRequestsByRestaurant(restaurantId);
 
     console.log(`🔍 Raw data to respond the GET request \n${JSON.stringify(rawItems)} \nFor Restaurant: ${restaurantId}`);
 
-    // 🧹 2. Filter for active requests and transform them to match "TableRequestPayload"
-    const mappedPayloads = rawItems
-        .map((item) => {
-            const requestId = item.SK.replace("REQ#", ""); // Strip the prefix back out to get the clean ID
+    // 🧹 Filter for active requests and transform them to match "TableRequestPayload"
+    const filteredRequests = processActiveRequests(rawItems)
 
-            // Return the exact structure matching your client-side type definitions
-            return {
-                requestId: requestId,
-                userId: item.userId,
-                userName: item.userName,
-                groupSize: item.groupSize,
-                onQueuedTimestamp: item.onQueuedTimestamp,
-                state: item.state,
-                specifics: item.specifics,
-                arrivlaTime: item.arrivlaTime // TODO: Correct the name "arrivalTimeInMinunes"
-            };
-        });
+    console.log(`1️⃣📩\nActive requests found\n ${JSON.stringify(filteredRequests.activeRequests)}\n Expired requests found:\n${filteredRequests.expiredRequestIds} \nFor Restaurant: ${restaurantId}`);
 
-    console.log(`1️⃣📦  Initialized UI state feed: Found \n${JSON.stringify(mappedPayloads)} \nFor Restaurant: ${restaurantId}`);
-
-    return mappedPayloads;
+    return filteredRequests;
 }
 
 export async function updateRequestStatus(
@@ -161,6 +150,8 @@ export async function updateRequestStatus(
 
     // TODO: Check if it's a valid status
     // TODO: Before update, check that the status transition is valid
+
+    // TODO: Check if the request didn't expired (for "QUEUED" and "ACCEPTED") 
 
     // TODO:
     // 1. Get the active requests of the user and separate them from the current request.
@@ -209,30 +200,74 @@ export async function updateRequestStatus(
 
 export async function obtainActiveRequestStatuses(
     requestsToUpdate: RequestIdentificatorsPayload[]
-): Promise<ActiveRequestStatus[]> {
+): Promise<ActiveRequests[]> {
     const requestItems = await batchGetRequests(requestsToUpdate);
 
     // Filter for active requests and transform them to match "TableRequestPayload"
-    const mappedPayloads = requestItems
+    const mappedPayloads: ActiveRequests[] = requestItems
         .map((item) => {
             const requestId = item.SK.replace("REQ#", ""); // Strip the prefix back out to get the clean ID
-            // const restaurantId = item.PK.replace("REST#", ""); // Strip the prefix back out to get the clean ID
+            const restaurantId = item.PK.replace("REST#", ""); // Strip the prefix back out to get the clean ID
 
             // Return the exact structure matching your client-side type definitions
             return {
                 requestId: requestId,
-                // restaurantId: restaurantId,
+                restaurantId: restaurantId,
                 state: item.state,
-                // userId: item.userId,
-                // //X userName: item.userName,
+                userId: item.userId,
+                // userName: item.userName,
                 // groupSize: item.groupSize,
-                // onQueuedTimestamp: item.onQueuedTimestamp,
+                onQueuedTimestamp: item.onQueuedTimestamp,
                 // specifics: item.specifics,
-                // arrivlaTime: item.arrivlaTime // TODO: Correct the name
+                arrivalTimeInMinutes: item.arrivlaTime // TODO: Correct the name
             };
         });
 
     console.log(`1️⃣📦  Requested Table requests from the  \n${JSON.stringify(mappedPayloads)} \n`);
 
     return mappedPayloads;
+}
+
+function processActiveRequests(items: Record<string, any>[], expirationTimeMs = 1800000 /* (30 * 60 * 1000) */): FilteredRequests {    
+    // Pre-allocate arrays to avoid dynamic resizing overhead during iteration
+    const expiredRequestIds: BatchCancellationItem[] = [];
+    const activeRequests: ActiveRequestsResponse[] = [];
+
+    const now =  Date.now()
+    
+    // Single-pass classic for-loop (the fastest iteration method in V8/Node.js)
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        
+        // Skip malformed records immediately if safety is a concern
+        if (!item) continue; 
+
+        // Compare timestamp and state
+        const ageSinceCreation = now - (item.onQueuedTimestamp || 0);
+        // TODO: const ageSinceAcceptance ... // assign a new age when we assign a "onContinueAcceptanceLocalTimestamp" in data
+        const state = item.state;
+
+        const requestId = item.SK.replace("REQ#", "")
+        const restaurantId = item.PK.replace("REST#", "")
+
+        if ((state === "QUEUED" || state === "ACCEPTED") && (ageSinceCreation) > expirationTimeMs) {   // TODO: Inlcude the "READY" and "PAID_TRIED" too later.
+            expiredRequestIds.push({
+                restaurantId: restaurantId,
+                requestId: requestId
+            });
+        } else {
+            activeRequests.push({
+                requestId: requestId,
+                userId: item.userId,
+                userName: item.userName,
+                groupSize: item.groupSize,
+                onQueuedTimestamp: item.onQueuedTimestamp,
+                state: item.state,
+                specifics: item.specifics,
+                arrivlaTime: item.arrivlaTime,
+            });
+        }
+    }
+
+    return { expiredRequestIds, activeRequests };
 }

@@ -5,7 +5,7 @@ import {
     obtainActiveRequestStatuses,
     obtainRestaurantActiveRequests,
     saveRequest,
-    transmitBatchRequestCancellation,
+    transmitBatchRequestCancellationToRestaurants as transmitBatchRequestCancellationToRestaurants,
     transmitRequestCancellation,
     transmitTableRequest,
     updateRequestStatus,
@@ -52,7 +52,8 @@ requestsRouter.post("/create", async (c) => {
     const createRequestResponse: CreateRequestResponse = {
       message: "Request created successfully and broadcast state synchronized",
       requestId: body.requestId,
-      realtimeNotified: ablyDispatchSuccess
+      realtimeNotified: ablyDispatchSuccess,
+      onQueuedTimestamp: requestTime,
     };
 
     // 🎉 5. Success response utilizing Hono native JSON encoder
@@ -123,7 +124,7 @@ requestsRouter.post( "/cancel",async (c) => {
     await deactivateBatchRequests(body);
     console.log(`✅  Batch cancellation processed successfully`);
 
-    await transmitBatchRequestCancellation(body);
+    await transmitBatchRequestCancellationToRestaurants(body);
     console.log(`✅  Batch cancellation transmitted successfully`);
 
     return c.json({
@@ -149,10 +150,16 @@ requestsRouter.get("/:restaurantId", async (c) => {
       return c.json({ error: "Missing restaurantId parameter" }, 400);
     }
 
-    const mappedPayloads = await obtainRestaurantActiveRequests(rid);
+    const filteredRequests = await obtainRestaurantActiveRequests(rid);
+
+    //Deactivate the expired requests
+    if(filteredRequests.expiredRequestIds.length !== 0){  // TODO: Later, include a event bridge that clean those items that are not deleted due the restaurant doesn't enter again to the app
+      await deactivateBatchRequests({requestsToCancel: filteredRequests.expiredRequestIds})
+      // I didn't include transmission because the clients can delete the request by time themselves
+    }
 
     // 🎉 3. Output the compiled collection straight to your frontend
-    return c.json(mappedPayloads, 200);
+    return c.json(filteredRequests.activeRequests, 200);
 
   } catch (error: any) {
     console.error(`🚨 FETCH ACTIVE REQS ERROR: ${error.message}`);
@@ -209,7 +216,7 @@ requestsRouter.post("/active", async (c) => { /// It's accepted to use POST for 
     const mappedPayloads = await obtainActiveRequestStatuses(requestsToUpdate);
 
     return c.json({
-      statuses: mappedPayloads
+      activeRequests: mappedPayloads  // TODO: Move this "activeRequest" to an interface to don't build the object here
     }, 200);
   }
   catch (error: any) {

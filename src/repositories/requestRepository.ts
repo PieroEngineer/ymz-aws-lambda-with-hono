@@ -43,7 +43,7 @@ export async function updateRequestToDeactivate(restaurantId: string, requestId:
     }))
 }
 
-export async function queryActiveRequestsByRestaurant(restaurantId: string) {
+export async function queryActiveRequestsByRestaurant(restaurantId: string) {   // TODO: Include a type for the output
     // 🔍 1. Query DynamoDB for everything matching this restaurant's requests partition
     const queryParams = {
         TableName: TABLE_NAME,
