@@ -13,6 +13,7 @@ export interface PaymentConfirmationPayload {
     arrivalTimeInMinutes: number
     groupSize: number
     orderSelections: OrderItemPayload[]
+    extraCommentaries: string
 }
 
 export interface FinalizeOrderPayload{
@@ -41,6 +42,7 @@ export interface Order{ /// For now, it's practically "OrderResponse" // TODO: T
     // lastUpdateTimestamp: number
     onPaidTimeStamp: number
     paymentImageUrl: string
+    extraCommentaries: string
 }
 
 // --- Repository types ---

@@ -22,7 +22,7 @@ export async function getAllActiveOrders( restaurantId: string ): Promise<Order[
 
     const mappedOrders = rawItems.map((item) => {
         const orderId = item.SK.replace("ORDER#", "");
-        // or  const requestId = item.GSISK.replace("ORDER#ACTIVE#", "");
+        // or const orderId = item.GSISK.replace("ORDER#ACTIVE#", "");
 
         const order: Order = {
             orderId: orderId,
@@ -35,7 +35,8 @@ export async function getAllActiveOrders( restaurantId: string ): Promise<Order[
             groupSize: item.groupSize,
             totalCostInCents: item.totalCostInCents,
             onPaidTimeStamp: item.onPaidTimeStamp,
-            paymentImageUrl: item.paymentImageUrl
+            paymentImageUrl: item.paymentImageUrl,
+            extraCommentaries: item.extraCommentaries ?? ""
         }
 
       return order
@@ -46,7 +47,7 @@ export async function getAllActiveOrders( restaurantId: string ): Promise<Order[
 
 
 
-export async function getSpecificDishesData( orderSelections: OrderItemPayload[], restaurantId: string ): Promise<dishPrice[]>{
+export async function getSpecificDishesData( orderSelections: OrderItemPayload[], restaurantId: string ): Promise<dishPrice[]>{ /// Maybe it should be in the restuarant route
     // Map your SKs into the required DynamoDB key structure
     const keys = orderSelections.map((selection) => ({
         PK: `REST#${restaurantId}`,
