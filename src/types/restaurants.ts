@@ -11,13 +11,13 @@ export interface RestaurantInitializePayload {
 
 export interface RestaurantUpdatePayload {
     restaurantName: string
-    logoUrlRequired: boolean
+    logoUrl: string
     latitude: number
     longitude: number
-    dishesToShowUrlsRequired: [boolean, boolean, boolean]
+    dishesToShowUrls: [string, string, string]
     phoneNumberToPay: string
     phoneNumberToContact: string
-    paymentQrUrlsRequired: boolean
+    paymentQrUrl: string
 }
 
 export interface MenuSyncPayload {

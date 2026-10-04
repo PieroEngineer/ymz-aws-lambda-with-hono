@@ -1,4 +1,4 @@
-import { generateS3PresignedUrl } from "../clients/s3Client.js";
+import { deleteS3Objects, generateS3PresignedUrl, temporalS3extractorFromUrl } from "../clients/s3Client.js";
 import {
     batchGetRestaurantMetadata,
     buildDishDeleteTransactItem,
@@ -40,11 +40,13 @@ export async function initializeRestaurantInfo(
     payload: RestaurantInitializePayload
 ): Promise<RestaurantInitializeResponse> {
     // TODO: Do the same validation of the client-side to check if the mandatory fields are sent for the intitialization (For the urls, verify shape)
+    
+    const unixEpoch = Math.floor(Date.now() / 1000);
 
     console.log(`🔎🏪  Initialize restaurant info whose ID is ${restaurantId}\n`, JSON.stringify(payload, null, 2));
-
+    
     // 🔒 SECURITY STRATEGY: Generate a secure, predictable key coordinate path inside S3
-    const logoS3Key = `logo/${restaurantId}.webp`;
+    const logoS3Key = `logo/${restaurantId}/${unixEpoch}.webp`;
 
     const logoPresigned = await generateS3PresignedUrl(logoS3Key);
     console.log('🔎🖼️  Logo public Url', logoPresigned.publicUrl);
@@ -57,7 +59,7 @@ export async function initializeRestaurantInfo(
         if (payload.dishesToShowUrlsRequired[i]) { // TODO: Change it for blank checking
 
             // 🔒 SECURITY STRATEGY: Generate a secure, predictable key coordinate path inside S3
-            const s3Key = `front/${i}/${restaurantId}.webp`;
+            const s3Key = `front/${i}/${restaurantId}/${unixEpoch}.webp`;
 
             const dishPresigned = await generateS3PresignedUrl(s3Key);
             console.log(`🔎🖼️  dish ${i} to show image public Url`, dishPresigned.publicUrl);
@@ -76,7 +78,7 @@ export async function initializeRestaurantInfo(
     }
 
     // 🔒 SECURITY STRATEGY: Generate a secure, predictable key coordinate path inside S3
-    const qrS3Key = `qr/${restaurantId}.webp`;
+    const qrS3Key = `qr/${restaurantId}/${unixEpoch}.webp`;
 
     const qrPresigned = await generateS3PresignedUrl(qrS3Key);
     console.log('🔎🖼️  QR public Url', qrPresigned.publicUrl);
@@ -117,7 +119,7 @@ export async function obtainRestaurantInfo(restaurantId: string): Promise<Restau
     const restaurantItem = await getRestaurantMetadata(restaurantId);
 
     if (!restaurantItem) {
-        console.log(`⚠️🏪  Restaurant (${restaurantId}) wasn't found. Returning an empty restaurant \n`);
+        console.log(`⚠️🏪  Restaurant (${restaurantId}) wasn't found (Not initialized yet). Returning an empty restaurant \n`);
         return { // Temporal shape for a restaurant that wasn't initialized in the table yet 
             restaurantId: '',
             restaurantName: '',
@@ -161,7 +163,11 @@ export async function updateRestaurantInfo(
 ): Promise<RestaurantInitializeResponse> {
     // TODO: Include the "isOpen" when the dynamic update is done.
 
+    const unixEpoch = Math.floor(Date.now() / 1000);
+
     console.log(`🔎🏪  Restaurant info received for ID: ${restaurantId}\n`, JSON.stringify(payload, null, 2));
+
+    const imageKeysToDelete: string[] = []
 
     const dataToUpdate: RestaurantDataToUpdate = {
         name: payload.restaurantName,
@@ -174,10 +180,10 @@ export async function updateRestaurantInfo(
     };
 
     let logoUploadUrl;
-    if (payload.logoUrlRequired) {
+    if (payload.logoUrl !== "") {
 
         // 🔒 SECURITY STRATEGY: Generate a secure, predictable key coordinate path inside S3
-        const logoS3Key = `logo/${restaurantId}.webp`;
+        const logoS3Key = `logo/${restaurantId}/${unixEpoch}.webp`;
 
         const logoPresigned = await generateS3PresignedUrl(logoS3Key);
         console.log('🔎🖼️  Logo public Url', logoPresigned.publicUrl);
@@ -187,7 +193,9 @@ export async function updateRestaurantInfo(
 
         dataToUpdate.logoUrl = logoPresigned.publicUrl;
 
-        console.log('✅🖼️  Logo upload Url');
+        console.log('✅🖼️  Logo upload Url generated');
+
+        imageKeysToDelete.push(temporalS3extractorFromUrl(payload.logoUrl))
     }
     else {
         logoUploadUrl = '';
@@ -202,20 +210,22 @@ export async function updateRestaurantInfo(
     const dishesToUploadShowUrls = new Array<string>(3);
     for (let i = 0; i < 3; i++) {
 
-        if (payload.dishesToShowUrlsRequired[i] === true) {
+        if (payload.dishesToShowUrls[i] !== "") {
 
             // 🔒 SECURITY STRATEGY: Generate a secure, predictable key coordinate path inside S3
-            const s3Key = `front/${i}/${restaurantId}.webp`;
+            const s3Key = `front/${i}/${restaurantId}/${unixEpoch}.webp`;
 
             const dishPresigned = await generateS3PresignedUrl(s3Key);
             console.log(`🔎🖼️  dish ${i} to show image public Url`, dishPresigned.publicUrl);
-
+            
             dishImageSelection[i](dishPresigned.publicUrl);
-
+            
             // 🛠️ ASSET SEPARATED HANDSHAKE CHECK: Craft a temporary cryptographic upload token signature URL
             dishesToUploadShowUrls[i] = dishPresigned.uploadUrl;
-
+            
             console.log('✅🖼️  Dish image upload Url');
+            
+            imageKeysToDelete.push(temporalS3extractorFromUrl(payload.dishesToShowUrls[i]))
         }
         else {
             dishesToUploadShowUrls[i] = '';
@@ -223,10 +233,10 @@ export async function updateRestaurantInfo(
     }
 
     let qrUploadUrl;
-    if (payload.paymentQrUrlsRequired) {
+    if (payload.paymentQrUrl !== "") {
 
         // 🔒 SECURITY STRATEGY: Generate a secure, predictable key coordinate path inside S3
-        const qrS3Key = `qr/${restaurantId}.webp`;
+        const qrS3Key = `qr/${restaurantId}/${unixEpoch}.webp`;
 
         const qrPresigned = await generateS3PresignedUrl(qrS3Key);
         console.log('🔎🖼️  QR public Url', qrPresigned.publicUrl);
@@ -237,12 +247,18 @@ export async function updateRestaurantInfo(
         qrUploadUrl = qrPresigned.uploadUrl;
 
         console.log('✅🖼️  QR upload Url');
+
+        imageKeysToDelete.push(temporalS3extractorFromUrl(payload.paymentQrUrl))
     }
     else {
         qrUploadUrl = '';
     }
 
     await updateRestaurantMetadata(restaurantId, dataToUpdate);
+
+    if( imageKeysToDelete.length > 0){
+        await deleteS3Objects(imageKeysToDelete)
+    }
 
     console.log(`✅⤴️ Updating restaurant info: ${restaurantId}`);
 
@@ -405,6 +421,8 @@ export async function synchronizeRestaurantMenu(
 
     console.log(`🔎📃  Pages received:\n${JSON.stringify(menuPages, null, 2)}`);
 
+    const imageKeysToDelete: string[] = []
+
     // 📃 PROCESS MENU PAGES
     for (const page of menuPages) {
         const pageId = page.pageId;
@@ -412,10 +430,18 @@ export async function synchronizeRestaurantMenu(
 
         if (action === "delete") {
             transactionItems.push(buildMenuPageDeleteTransactItem(restaurantId, pageId));
+
+            if(page.updatedFields !== undefined){
+                const imageUrl = page.updatedFields.imageUrl as string
+
+                imageKeysToDelete.push(temporalS3extractorFromUrl(imageUrl))
+            }
         } else if (action === "save" || action === "update") {  //TODO: Add checking to avoid to images with the same page number 
             // 🔒 SECURITY STRATEGY: Generate a secure, predictable key coordinate path inside S3
-            // const s3Key = `restaurants/${rid}/menus/${pageId}.webp`;
-            const s3Key = `menus/${pageId}.webp`;
+
+            const unixEpoch = Math.floor(Date.now() / 1000);
+
+            const s3Key = `menus/${pageId}/${unixEpoch}.webp`;
 
             const pagePresigned = await generateS3PresignedUrl(s3Key);
             console.log('🔎  publicUrl', pagePresigned.publicUrl);
@@ -440,6 +466,12 @@ export async function synchronizeRestaurantMenu(
                     page.updatedFields || {},
                     pagePresigned.publicUrl
                 );
+
+                if(page.updatedFields !== undefined){
+                    const imageUrl = page.updatedFields.imageUrl as string
+
+                    imageKeysToDelete.push(temporalS3extractorFromUrl(imageUrl))
+                }
 
                 if (updateItem) {
                     transactionItems.push(updateItem);
@@ -485,6 +517,10 @@ export async function synchronizeRestaurantMenu(
     }
 
     await executeMenuTransaction(transactionItems);
+
+    if( imageKeysToDelete.length > 0){
+        await deleteS3Objects(imageKeysToDelete)
+    }
 
     // 🎯 OUTPUT: Enforce formatting structure to output "SyncDataFirstResponse"
     const responsePayload: SyncDataFirstResponse = {
