@@ -8,6 +8,17 @@ import { contactsRouter } from "./routes/contacts.js";
 import { cors } from "hono/cors";
 import { trackingRouter } from "./routes/tracking.js";
 
+
+/*
+----------------------------------------------------------------
+Credits: Made by Piero Olivas Tuesta 😉
+LinkedIn: /pieroengineerperu
+Email: psot14022001@gmail.com
+----------------------------------------------------------------
+*/
+
+
+
 // Initialize the root Hono platform application
 const app = new Hono();
 
