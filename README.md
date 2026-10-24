@@ -1,15 +1,12 @@
+# What is Yummizi (ymz)?
+Yummizi was a foodtech startup project that allowed restaurants to prepare diners' food while they were on their way to the establishment. Although I didn't continue with the project due to validation issues, it taught me a lot about marketing, sales, and full-stack development.
 
-DynamoDB Query Range Reference
+I think that the best way to be grateful for what I have is to share it. Here, I share with you what I learned by building a stable, real-time platform that connects diners with restaurants the Yummizi way.
 
-+ An Entire Month
-	+ Set :from to: ORDER#2026-10
-	+ Set :to to: ORDER#2026-10\uFFFF
-	+ Matches: All orders in October 2026
-+ A Specific Day
-	+ Set :from to: ORDER#2026-10-08
-	+ Set :to to: ORDER#2026-10-08\uFFFF
-	+ Matches: Every item/order created on October 8, 2026
-+ Down to the Minute
-	+ Set :from to: ORDER#2026-10-08T14:30
-	+ Set :to to: ORDER#2026-10-08T14:30\uFFFF
-	+ Matches: Orders in that exact minute
+# Sub-systems of the platform
++ AWS Lambda with hono (TS) -> PieroEngineer/ymz-aws-lambda-with-hono
++ AWS serverless configuration with AWS SAM (yaml) -> PieroEngineer/ymz-iac-with-aws-sam
++ Client for process observability (Python) -> PieroEngineer/ymz-admin-client-with-python
++ Landing page (HTML + JS + CSS) -> PieroEngineer/ymz-landing-page
++ Restaurant Web app (TS + Vite + React) -> PieroEngineer/ymz-restaurant-client-side
++ Diner Android app (Kotlin) -> PieroEngineer/ymz-diner-client-side
