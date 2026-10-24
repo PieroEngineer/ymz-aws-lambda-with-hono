@@ -9,7 +9,7 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../clients/docClient.js";
 import { GSI2_TABLE_NAME, TABLE_NAME } from "../k.js";
-import { DishSyncInput, RestaurantDataToUpdate, RestaurantMetadataData, TemporalFeedRestaurant } from "../types/restaurants.js";
+import { DishSyncInput, RestaurantDataToUpdate, RestaurantMetadataData, RestaurantIdentification } from "../types/restaurants.js";
 
 type TransactItem = NonNullable<TransactWriteCommandInput["TransactItems"]>[number];
 
@@ -18,7 +18,7 @@ export async function putRestaurantMetadata(restaurantId: string, data: Restaura
         new PutCommand({
             TableName: TABLE_NAME,
             Item: {
-                PK: `REST#${restaurantId}`,
+                PK: `REST#${restaurantId}`, // TODO: Change this restaurantId for a timestamp, and create a new attribute for the restaurantId
                 SK: "METADATA", // TODO: Include the datetime of creation here or its location
                 ...data // Unpacks and saves all incoming attributes
             }
@@ -81,7 +81,7 @@ export async function queryUserFeedLinks(userId: string) {
     return feedLinksResponse.Items || [];
 }
 
-export async function getTemporalRestaurantFeed(): Promise<TemporalFeedRestaurant[]> {
+export async function getAvailableRestaurantIds(): Promise<RestaurantIdentification[]> {
     const command = new QueryCommand({
         TableName: TABLE_NAME,
         IndexName: GSI2_TABLE_NAME,

@@ -48,17 +48,21 @@ export interface TableRequestResponse {
     userName: string
     groupSize: number
     onQueuedTimestamp: number
+    onReadyTimestamp?: number
     state: string   // TODO: Create a type token to uniformized this 
     specifics: string[]
     arrivlaTime: number
 }
 
-export interface ActiveRequests {
+export interface ActiveRequests {   // TODO: Change the plural by singular
     requestId: string
     restaurantId: string
     state: string
     userId: string
     onQueuedTimestamp: number
+    onReadyTimestamp?: number
+    onAcceptedTimestamp?: number        // TODO: Add them in the other types too
+    onTryingToPayTimestamp?: number  //
     arrivalTimeInMinutes: number // TODO: Correct the name
 }
 
@@ -75,6 +79,7 @@ export interface UpdateRequestResponse {
     requestId: string
     newState: string
     realtimeNotified: boolean
+    onUpdateRequestStateTimestamp: number
 }
 
 export type ActiveRequestsResponse = Omit<TableRequest, 'restaurantId'>
@@ -86,6 +91,7 @@ export interface RequestItemData {
     userName: string
     groupSize: number
     onQueuedTimestamp: number
+    onReadyTimestamp?: number
     state: string
     specifics: string[]
     arrivlaTime: number
@@ -107,6 +113,7 @@ export interface TableRequest {
     userName: string,
     groupSize: number,
     onQueuedTimestamp: number,
+    onReadyTimestamp?: number
     state: string,  // TODO: Use a token for this
     specifics: string[],
     arrivlaTime: number,

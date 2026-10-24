@@ -4,6 +4,44 @@ import { OrderItemPayload } from "../types/orders.js";
 import { ConfirmedOrder, ConfirmedOrderItem, dishPrice, dishPricesDbResponse, Order } from "../types/payments.js";
 import { BatchGetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 
+export async function getRestaurantOrdersOfAPeriod(restaurantId: string, from: string, to: string): Promise<Order[]> {
+    const command = new QueryCommand({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: 'PK = :pk AND SK BETWEEN :from AND :to',
+        ExpressionAttributeValues: {
+        ':pk': `REST#${restaurantId}`,
+        ':from': `ORDER#${from}`,
+        ':to': `ORDER#${to}\uFFFF`,
+        },
+        ConsistentRead: false,
+    })  // TODO: Use "ExclusiveStartKey" when it grows
+
+    const result = (await docClient.send(command)).Items || []
+
+    const mappedOrders = result.map((item) => {
+        const orderId = item.SK.replace("ORDER#", "");
+        // or const orderId = item.GSISK.replace("ORDER#ACTIVE#", "");
+
+        const order: Order = {
+            orderId: orderId,
+            requestId: item.requestId ?? orderId,   // ANCHOR: Remove the fallback when publish the app
+            userName: item.userName,
+            // lastUpdateTimestamp: item.lastUpdateTimestamp,
+            userId: item.userId,
+            orderSelections: item.orderSelections,
+            arrivalTimeInMinutes: item.arrivalTimeInMinutes,
+            groupSize: item.groupSize,
+            totalCostInCents: item.totalCostInCents,
+            onPaidTimeStamp: item.onPaidTimeStamp,
+            paymentImageUrl: item.paymentImageUrl,
+            extraCommentaries: item.extraCommentaries ?? ""
+        }
+
+      return order
+    });
+
+    return mappedOrders
+}
 
 export async function getAllActiveOrders( restaurantId: string ): Promise<Order[]> {
 

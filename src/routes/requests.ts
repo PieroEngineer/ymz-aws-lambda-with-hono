@@ -183,12 +183,13 @@ requestsRouter.post("/:restaurantId/update", async (c) => { /// (#1) Analize if 
 
     // TODO: Create timestamp for this event
 
-    const { normalizedState, realtimeNotified } = await updateRequestStatus(restaurantId, body, /*now*/);
+    const { normalizedState, realtimeNotified, onUpdateRequestStateTimestamp } = await updateRequestStatus(restaurantId, body, /*now*/);
 
     console.log(`🔎  The post of the request update finished`);
 
     const updateRequestResponse: UpdateRequestResponse = {
       message: "Request state updated successfully",
+      onUpdateRequestStateTimestamp: onUpdateRequestStateTimestamp,
       restaurantId, // TODO: Are these bellow attributes  necessary?
       requestId: body.requestId,
       newState: normalizedState,

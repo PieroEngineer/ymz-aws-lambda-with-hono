@@ -6,6 +6,7 @@ import { restaurantsRouter } from "./routes/restaurants.js"; // 🔌 Import the 
 import { usersRouter } from "./routes/users.js";
 import { contactsRouter } from "./routes/contacts.js";
 import { cors } from "hono/cors";
+import { trackingRouter } from "./routes/tracking.js";
 
 // Initialize the root Hono platform application
 const app = new Hono();
@@ -40,6 +41,7 @@ app.route("/requests", requestsRouter);
 app.route("/restaurants", restaurantsRouter);
 app.route("/users", usersRouter);
 app.route("/contacts", contactsRouter);
+app.route("/tracking", trackingRouter)
 
 /**
  * 🎯 BASE HEALTH CHECK ROUTE

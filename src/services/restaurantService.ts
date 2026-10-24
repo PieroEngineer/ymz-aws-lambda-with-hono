@@ -10,7 +10,7 @@ import {
     executeMenuTransaction,
     getRestaurantMetadata,
     getRestaurantPaymentMetadata,
-    getTemporalRestaurantFeed,
+    getAvailableRestaurantIds,
     putRestaurantMetadata,
     queryRestaurantMenuResources,
     updateRestaurantMetadata,
@@ -30,6 +30,7 @@ import {
     RestaurantMetadataData,
     RestaurantUpdatePayload,
     SyncDataFirstResponse,
+    RestaurantIdentification,
 } from "../types/restaurants.js";
 import { TransactWriteCommandInput } from "@aws-sdk/lib-dynamodb";
 
@@ -98,7 +99,7 @@ export async function initializeRestaurantInfo(
         isOpen: true, //true
         isInitialized: true,
 
-        GSI2PK: 'RMETADATA',
+        GSI2PK: 'RMETADATA',    //TODO: Shard in different restaurant sectors when it grows
         GSI2SK: `REST#${restaurantId}`
     };
 
@@ -269,7 +270,12 @@ export async function updateRestaurantInfo(
     };
 }
 
-export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]> { // TODO: Order this
+// TODO: Later, it's going to call by shards
+export async function obtainAvailableRestaurantIds(): Promise<RestaurantIdentification[]>{
+    return await getAvailableRestaurantIds()
+}
+
+export async function obtainTemporalPersonalizedFeed(userId: string): Promise<FeedItem[]> { // TODO: Order this
     console.log(`🔎😌  Fetching personalized feed for User: ${userId}`);
 
     console.log(`🔎😌 User ID was fown: ${userId}`);
@@ -277,7 +283,7 @@ export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]
     // 2. STEP 1: Find the Section relation pointer records (SEC# rows)
     // const feedLinks = await queryUserFeedLinks(userId);
 
-    const temporalFeedLinks = await getTemporalRestaurantFeed()
+    const temporalFeedLinks = await getAvailableRestaurantIds()
 
     ///
     // if (feedLinks.length === 0) {
@@ -340,7 +346,7 @@ export async function obtainPersonalizedFeed(userId: string): Promise<FeedItem[]
             latitude: res.latitude,
             longitude: res.longitude,
             phoneNumberToContact: res.phoneNumberToContact
-            //isInitialized // FIXME: Only show restaurants that were initialized
+            //isInitialized // FIXME: Only show restaurants that were initialized   // Apparently, it's already done
             //isOpen // TODO: When the restaurant is reay to open
         };
     });

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import {
     initializeRestaurantInfo,
-    obtainPersonalizedFeed,
+    obtainTemporalPersonalizedFeed,
     obtainRestaurantInfo,
     obtainRestaurantMenu,
     obtainRestaurantPaymentInfo,
@@ -19,7 +19,7 @@ import {
 //TODO: Change the URLs by keys, the entire link shouldn't be sent
 
 // 📦 Create an isolated sub-router specifically for restaurant data processing
-export const restaurantsRouter = new Hono();
+export const restaurantsRouter = new Hono();  // TODO: Consider divide this router between "restuarants" and "Menu"
 
 restaurantsRouter.post("/:restaurantId/info/initialize", async (c) => {
   // TODO: Here the restaurant is initialized with the default values when the restaurant register
@@ -101,7 +101,7 @@ restaurantsRouter.get("/feed", async (c) => { /// Maybe it's better to move this
       return c.json({ error: "Missing userId" }, 400);
     }
 
-    const formattedFeed = await obtainPersonalizedFeed(userId);
+    const formattedFeed = await obtainTemporalPersonalizedFeed(userId);
 
     return c.json(formattedFeed, 200);
 

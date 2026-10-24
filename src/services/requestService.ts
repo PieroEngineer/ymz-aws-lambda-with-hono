@@ -1,6 +1,6 @@
 import { transmitBatchPublishingViaAbly, transmitViaAbly } from "../clients/ablyClient.js";
 import { ablyKeyWS } from "../k.js";
-import { batchGetRequests, putRequest, queryActiveRequestsByRestaurant, updateBatchRequestsToDeactivate, updateRequestState, updateRequestToDeactivate } from "../repositories/requestRepository.js";
+import { batchGetRequests, getRestaurantRequestsOfAPeriod, putRequest, queryActiveRequestsByRestaurant, updateBatchRequestsToDeactivate, updateRequestState, updateRequestToDeactivate } from "../repositories/requestRepository.js";
 import {
     ActiveRequests,
     RequestCancelClientPayload,
@@ -45,6 +45,10 @@ export async function saveRequest(requestPayload: TableRequestPayload, requestTi
     await putRequest(currentTableRequest);
 
     return currentTableRequest;
+}
+
+export async function obtainRestaurantRequestsOfAPeriod(restaurantId: string, from: string, to: string): Promise<ActiveRequests[]> {
+    return await getRestaurantRequestsOfAPeriod(restaurantId, from, to)
 }
 
 export async function transmitTableRequest(requestPayload: TableRequestPayload, requestTime: number): Promise<boolean> {
@@ -142,10 +146,10 @@ export async function obtainRestaurantActiveRequests(restaurantId: string): Prom
     return filteredRequests;
 }
 
-export async function updateRequestStatus(
+export async function updateRequestStatus(  // TODO: Apparently, we need to separate them
     restaurantId: string,
     updatePayload: RequestUpdatePayload
-): Promise<{ normalizedState: string; realtimeNotified: boolean }> {
+): Promise<{ normalizedState: string; realtimeNotified: boolean, onUpdateRequestStateTimestamp: number }> {
     const normalizedState = String(updatePayload.newState); /// Necessary?
 
     // TODO: Check if it's a valid status
@@ -157,6 +161,8 @@ export async function updateRequestStatus(
     // 1. Get the active requests of the user and separate them from the current request.
     // 2. Cancel those request in DynamoBD (In MVP, it's deleting them, but then is updating the attribute "onCancelTimestamp") 
     // 3. Use the batch publish of Ably to cancel the table request of the other restaurants (In claude "AWS expert" is the code ) 
+    
+    const onUpdateRequestStateTimestamp = Date.now()
 
     let channelName;
     switch (normalizedState) {
@@ -169,7 +175,7 @@ export async function updateRequestStatus(
             break;
     }
 
-    await updateRequestState(restaurantId, updatePayload.requestId, normalizedState);
+    await updateRequestState(restaurantId, updatePayload.requestId, normalizedState, onUpdateRequestStateTimestamp);
 
     let realtimeNotified = false;
 
@@ -195,7 +201,7 @@ export async function updateRequestStatus(
         console.warn("⚠️ ABLY_API_KEY is not defined; skipping realtime broadcast.");
     }
 
-    return { normalizedState, realtimeNotified };
+    return { normalizedState, realtimeNotified, onUpdateRequestStateTimestamp };
 }
 
 export async function obtainActiveRequestStatuses(
@@ -228,7 +234,11 @@ export async function obtainActiveRequestStatuses(
     return mappedPayloads;
 }
 
-function processActiveRequests(items: Record<string, any>[], expirationTimeMs = 1800000 /* (30 * 60 * 1000) */): FilteredRequests {    
+function processActiveRequests(
+    items: Record<string, any>[],
+    onQueuedExpirationTimeMs = 1800000 /* (30 * 60 * 1000) */,
+    onReadyExpirationTimeMs = 300000 /* (5 * 60 * 1000) */
+): FilteredRequests {
     // Pre-allocate arrays to avoid dynamic resizing overhead during iteration
     const expiredRequestIds: BatchCancellationItem[] = [];
     const activeRequests: ActiveRequestsResponse[] = [];
@@ -243,20 +253,28 @@ function processActiveRequests(items: Record<string, any>[], expirationTimeMs = 
         if (!item) continue; 
 
         // Compare timestamp and state
-        const ageSinceCreation = now - (item.onQueuedTimestamp || 0);
+        const ageSinceRequestCreation = now - (item.onQueuedTimestamp || 0);
+        const ageSinceRequstIsReady = now - (item.onReadyTimestamp || 0);
         // TODO: const ageSinceAcceptance ... // assign a new age when we assign a "onContinueAcceptanceLocalTimestamp" in data
         const state = item.state;
 
         const requestId = item.SK.replace("REQ#", "")
         const restaurantId = item.PK.replace("REST#", "")
 
-        if ((state === "QUEUED" || state === "ACCEPTED") && (ageSinceCreation) > expirationTimeMs) {   // TODO: Inlcude the "READY" and "PAID_TRIED" too later.
+        if ((state === "QUEUED" || state === "ACCEPTED") && (ageSinceRequestCreation > onQueuedExpirationTimeMs)) {   // TODO: Inlcude the "READY" and "PAID_TRIED" too later.
             expiredRequestIds.push({
                 restaurantId: restaurantId,
                 requestId: requestId
             });
         } else {
-            activeRequests.push({
+
+            if((state === 'READY') && (ageSinceRequstIsReady > onReadyExpirationTimeMs)){
+                expiredRequestIds.push({
+                    restaurantId: restaurantId,
+                    requestId: requestId
+                });
+            } else {
+                activeRequests.push({
                 requestId: requestId,
                 userId: item.userId,
                 userName: item.userName,
@@ -266,6 +284,7 @@ function processActiveRequests(items: Record<string, any>[], expirationTimeMs = 
                 specifics: item.specifics,
                 arrivlaTime: item.arrivlaTime,
             });
+            }            
         }
     }
 

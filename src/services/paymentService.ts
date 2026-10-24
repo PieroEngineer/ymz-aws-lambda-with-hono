@@ -1,6 +1,6 @@
 import { transmitViaAbly } from "../clients/ablyClient.js";
 import { generateS3PresignedUrl } from "../clients/s3Client.js";
-import { getAllActiveOrders, getSpecificDishesData, putConfirmedOrder, updateOrderToDeactivate } from "../repositories/paymentRepository.js";
+import { getAllActiveOrders, getRestaurantOrdersOfAPeriod, getSpecificDishesData, putConfirmedOrder, updateOrderToDeactivate } from "../repositories/paymentRepository.js";
 import { updateRequestToDeactivate } from "../repositories/requestRepository.js";
 import { OrderItemPayload } from "../types/orders.js";
 import { ConfirmedOrder, dishPrice, Order } from "../types/payments.js";
@@ -17,7 +17,9 @@ export async function obtainAllActiveOrders( restaurantId: string ): Promise<Ord
   return await getAllActiveOrders( restaurantId )
 }
 
-
+export async function obtainRestaurantOrdersOfAPeriod(restaurantId: string, from: string, to: string): Promise<Order[]> {
+  return await getRestaurantOrdersOfAPeriod(restaurantId, from, to)
+}
 
 export async function finalizeOrder(restaurantId: string, orderId: string){
   await updateOrderToDeactivate(restaurantId, orderId)

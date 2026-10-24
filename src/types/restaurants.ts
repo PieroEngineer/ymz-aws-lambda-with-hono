@@ -159,10 +159,10 @@ export interface RestaurantMetadataData {
     isOpen: boolean
     isInitialized: boolean
 
-    GSI2PK: string  /// Temporal GSI, later it will be changed by the location attributes of "DynamoDB-Geo"
+    GSI2PK: string  //TODO: Temporal GSI, later it will be changed by the location attributes of "DynamoDB-Geo"
     GSI2SK: string
 }
 
-export interface TemporalFeedRestaurant{
+export interface RestaurantIdentification{
     restaurantId: string
 }
