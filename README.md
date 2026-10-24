@@ -182,4 +182,4 @@ my_uuids/        Sample entity IDs used by the seed script
 
 ## Author
 
-Made with 💙 by **Piero Olivas**
+Made with 💙 by **Piero Olivas Tuesta**
