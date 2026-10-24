@@ -11,6 +11,11 @@ I think that the best way to be grateful for what I have is to share it. Here, I
 + [Restaurant Web app](https://github.com/PieroEngineer/ymz-restaurant-client-side) (TS + Vite + React) 
 + [Diner Android app](https://github.com/PieroEngineer/ymz-diner-client-side) (Kotlin) 
 
+# Yummizi sample videos (Spanish)
+
++ [Diner's side](https://youtu.be/7b_l_gql7mM?si=8SZDDcmm5-jZD5qW) 🍽️
++ [Restaurant's side](https://youtu.be/fAfyB8eCOTE?si=P1Oo85OMT-clABDw) 🏪
+  
 # Yummizi Engine Backend
 
 Yummizi Engine is a TypeScript backend for the Yummizi restaurant and ordering
