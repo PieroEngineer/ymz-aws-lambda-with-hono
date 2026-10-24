@@ -13,7 +13,6 @@ import { trackingRouter } from "./routes/tracking.js";
 ----------------------------------------------------------------
 Credits: Made by Piero Olivas Tuesta 😉
 LinkedIn: /pieroengineerperu
-Email: psot14022001@gmail.com
 ----------------------------------------------------------------
 */
 
